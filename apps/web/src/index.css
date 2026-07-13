@@ -1,0 +1,147 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 98%;
+    --foreground: 0 0% 15%;
+    
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 15%;
+    
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 15%;
+    
+    --primary: 120 50% 40%;
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 45 100% 50%;
+    --secondary-foreground: 0 0% 15%;
+    
+    --muted: 0 0% 92%;
+    --muted-foreground: 0 0% 40%;
+    
+    --accent: 40 40% 50%;
+    --accent-foreground: 0 0% 100%;
+    
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    
+    --border: 0 0% 85%;
+    --input: 0 0% 85%;
+    --ring: 120 50% 40%;
+    
+    --radius: 0.5rem;
+  }
+  
+  .dark {
+    --background: 0 0% 12%;
+    --foreground: 0 0% 95%;
+    
+    --card: 0 0% 15%;
+    --card-foreground: 0 0% 95%;
+    
+    --popover: 0 0% 15%;
+    --popover-foreground: 0 0% 95%;
+    
+    --primary: 120 40% 45%;
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 45 90% 45%;
+    --secondary-foreground: 0 0% 10%;
+    
+    --muted: 0 0% 20%;
+    --muted-foreground: 0 0% 65%;
+    
+    --accent: 40 30% 45%;
+    --accent-foreground: 0 0% 95%;
+    
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+    
+    --border: 0 0% 25%;
+    --input: 0 0% 25%;
+    --ring: 120 40% 45%;
+  }
+  
+  * {
+    @apply border-border;
+  }
+  
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Barlow", sans-serif;
+    text-transform: uppercase;
+    overflow-x: hidden;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "Barlow", sans-serif;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-wrap: balance;
+  }
+  
+  h1 {
+    @apply text-4xl md:text-5xl lg:text-6xl leading-tight;
+  }
+  
+  h2 {
+    @apply text-3xl md:text-4xl leading-tight;
+  }
+  
+  h3 {
+    @apply text-2xl md:text-3xl leading-snug;
+  }
+  
+  p {
+    @apply leading-relaxed max-w-prose;
+  }
+  
+  a, button {
+    @apply transition-all duration-200;
+  }
+}
+
+@layer utilities {
+  .military-badge {
+    @apply inline-flex items-center justify-center px-3 py-1 rounded-sm text-xs font-extrabold tracking-widest border-2;
+  }
+  
+  .military-table {
+    @apply w-full border-collapse border-2 border-border;
+  }
+  .military-table th {
+    @apply bg-primary text-primary-foreground p-3 text-left font-extrabold tracking-wider border-2 border-border;
+  }
+  .military-table td {
+    @apply p-3 border-2 border-border bg-card font-medium text-card-foreground;
+  }
+  .military-table tr:hover td {
+    @apply bg-muted/30;
+  }
+
+  .map-container {
+    @apply w-full mx-auto relative overflow-hidden border-4 border-border shadow-xl bg-muted;
+    max-width: 600px;
+    aspect-ratio: 4/3;
+  }
+  
+  @media (min-width: 768px) {
+    .map-container {
+      height: 450px;
+      aspect-ratio: auto;
+    }
+  }
+  
+  .map-iframe {
+    @apply absolute top-0 left-0 w-full h-full border-0;
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+}
