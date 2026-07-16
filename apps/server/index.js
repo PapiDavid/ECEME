@@ -14,6 +14,23 @@ const db = mysql.createPool({
   database: process.env.DB_NAME || 'eceme_db'
 });
 
+const MAX_DOCENTES_POR_MATERIA = 3;
+
+// Devuelve (en el callback) las materias que ya llegaron al tope de docentes.
+// excludeDocenteId permite ignorar al propio docente al editar.
+function materiasSinCupo(materiaIds, excludeDocenteId, cb) {
+  if (!materiaIds || materiaIds.length === 0) return cb(null, []);
+  const placeholders = materiaIds.map(() => '?').join(',');
+  const params = [...materiaIds];
+  let sql = `SELECT materia_id, COUNT(*) AS c FROM docente_materias WHERE materia_id IN (${placeholders})`;
+  if (excludeDocenteId) { sql += ` AND docente_id != ?`; params.push(excludeDocenteId); }
+  sql += ` GROUP BY materia_id`;
+  db.query(sql, params, (err, rows) => {
+    if (err) return cb(err);
+    cb(null, rows.filter(r => r.c >= MAX_DOCENTES_POR_MATERIA).map(r => r.materia_id));
+  });
+}
+
 // --- 1. AUTENTICACIÓN ---
 app.post('/api/login', (req, res) => {
   const { identificador, password } = req.body;
@@ -94,28 +111,40 @@ app.get('/api/admin/estudiantes', (req, res) => {
   });
 });
 
-// Registro Estudiante con materia_id integrado
+// Registro Estudiante con materia_id integrado (código CUR-XXX generado automáticamente)
 app.post('/api/admin/estudiantes', (req, res) => {
-  const { nombre, codigo, grado, ciclo, password, materia_id } = req.body;
-  db.query("INSERT INTO usuarios (identificador, password, rol, primer_login) VALUES (?, ?, 'alumno', 1)", [codigo, password], (err, userRes) => {
-    if (err) return res.status(500).json(err);
-    
-    const mid = materia_id && materia_id !== '' ? parseInt(materia_id) : null;
-    db.query("INSERT INTO estudiantes (usuario_id, nombre, codigo, grado, ciclo, materia_id) VALUES (?, ?, ?, ?, ?, ?)", 
-    [userRes.insertId, nombre, codigo, grado, ciclo, mid], (err2) => {
-      if (err2) return res.status(500).json(err2);
-      res.json({ message: "Cursante registrado con materia" });
+  const { nombre, ci, grado, ciclo, password, materia_id, docente_id } = req.body;
+  const nombreU = (nombre || '').trim().toUpperCase();
+  const gradoU = (grado || '').trim().toUpperCase();
+  // Calculamos el siguiente correlativo en SQL (robusto a mayúsculas/formato)
+  db.query("SELECT IFNULL(MAX(CAST(SUBSTRING(codigo, 5) AS UNSIGNED)), 0) + 1 AS siguiente FROM estudiantes WHERE codigo LIKE 'CUR-%'", (errC, rowsC) => {
+    if (errC) return res.status(500).json(errC);
+    const codigo = 'CUR-' + String(rowsC[0].siguiente).padStart(3, '0');
+
+    db.query("INSERT INTO usuarios (identificador, password, rol, primer_login) VALUES (?, ?, 'alumno', 1)", [codigo, password], (err, userRes) => {
+      if (err) return res.status(500).json(err);
+
+      const mid = materia_id && materia_id !== '' ? parseInt(materia_id) : null;
+      const did = docente_id && docente_id !== '' ? parseInt(docente_id) : null;
+      db.query("INSERT INTO estudiantes (usuario_id, nombre, codigo, ci, grado, ciclo, materia_id, docente_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [userRes.insertId, nombreU, codigo, ci || null, gradoU, ciclo, mid, did], (err2) => {
+        if (err2) return res.status(500).json(err2);
+        res.json({ message: "Cursante registrado", codigo });
+      });
     });
   });
 });
 
 // Actualizar estudiante (Incluyendo materia_id)
 app.put('/api/admin/estudiantes/:id', (req, res) => {
-  const { nombre, grado, ciclo, materia_id } = req.body;
+  const { nombre, grado, ciclo, materia_id, docente_id } = req.body;
   const mid = materia_id && materia_id !== '' ? parseInt(materia_id) : null;
-  
-  const sql = "UPDATE estudiantes SET nombre = ?, grado = ?, ciclo = ?, materia_id = ? WHERE id = ?";
-  db.query(sql, [nombre, grado, ciclo, mid, req.params.id], (err) => {
+  const did = docente_id && docente_id !== '' ? parseInt(docente_id) : null;
+  const nombreU = (nombre || '').trim().toUpperCase();
+  const gradoU = (grado || '').trim().toUpperCase();
+
+  const sql = "UPDATE estudiantes SET nombre = ?, grado = ?, ciclo = ?, materia_id = ?, docente_id = ? WHERE id = ?";
+  db.query(sql, [nombreU, gradoU, ciclo, mid, did, req.params.id], (err) => {
     if (err) return res.status(500).json(err);
     res.json({ message: "Estudiante actualizado correctamente" });
   });
@@ -133,37 +162,88 @@ app.delete('/api/admin/estudiantes/:id', (req, res) => {
 });
 
 // --- DOCENTES ---
+// Devuelve cada docente con sus materias (nombres para mostrar + ids para editar)
 app.get('/api/admin/docentes', (req, res) => {
-  db.query("SELECT * FROM docentes ORDER BY nombre", (err, result) => {
+  const sql = `
+    SELECT d.*,
+      (SELECT GROUP_CONCAT(m.nombre ORDER BY m.nombre SEPARATOR ', ')
+         FROM docente_materias dm JOIN materias m ON dm.materia_id = m.id
+         WHERE dm.docente_id = d.id) AS materias_nombres,
+      (SELECT GROUP_CONCAT(dm.materia_id)
+         FROM docente_materias dm WHERE dm.docente_id = d.id) AS materia_ids
+    FROM docentes d ORDER BY d.nombre`;
+  db.query(sql, (err, result) => {
     if (err) return res.status(500).json(err);
     res.json(result);
   });
 });
 
-// Registro Docente con materia_id integrado
+// Registro Docente con VARIAS materias (código DOC-XXX generado automáticamente)
 app.post('/api/admin/docentes', (req, res) => {
-  const { nombre, codigo, grado, password, materia_id } = req.body;
-  db.query("INSERT INTO usuarios (identificador, password, rol, primer_login) VALUES (?, ?, 'profe', 1)", [codigo, password], (err, userRes) => {
-    if (err) return res.status(500).json(err);
-    
-    const mid = materia_id && materia_id !== '' ? parseInt(materia_id) : null;
-    db.query("INSERT INTO docentes (usuario_id, nombre, codigo, grado, materia_id) VALUES (?, ?, ?, ?, ?)", 
-    [userRes.insertId, nombre, codigo, grado, mid], (err2) => {
-      if (err2) return res.status(500).json(err2);
-      res.json({ message: "Docente registrado con materia" });
+  const { nombre, ci, grado, password } = req.body;
+  // Acepta materia única (listbox) o varias (materia_ids)
+  const materiaIds = ((req.body.materia_ids && req.body.materia_ids.length)
+    ? req.body.materia_ids
+    : (req.body.materia_id ? [req.body.materia_id] : [])).map(Number).filter(Boolean);
+  const nombreU = (nombre || '').trim().toUpperCase();
+  const gradoU = (grado || '').trim().toUpperCase();
+
+  materiasSinCupo(materiaIds, null, (cupoErr, llenas) => {
+    if (cupoErr) return res.status(500).json(cupoErr);
+    if (llenas.length > 0) return res.status(400).json({ message: `Una materia ya tiene el máximo de ${MAX_DOCENTES_POR_MATERIA} docentes` });
+
+    // Calculamos el siguiente correlativo en SQL (robusto a mayúsculas/formato)
+    db.query("SELECT IFNULL(MAX(CAST(SUBSTRING(codigo, 5) AS UNSIGNED)), 0) + 1 AS siguiente FROM docentes WHERE codigo LIKE 'DOC-%'", (errC, rowsC) => {
+      if (errC) return res.status(500).json(errC);
+      const codigo = 'DOC-' + String(rowsC[0].siguiente).padStart(3, '0');
+
+      db.query("INSERT INTO usuarios (identificador, password, rol, primer_login) VALUES (?, ?, 'profe', 1)", [codigo, password], (err, userRes) => {
+        if (err) return res.status(500).json(err);
+
+        const primaryMateria = materiaIds.length > 0 ? materiaIds[0] : null;
+        db.query("INSERT INTO docentes (usuario_id, nombre, codigo, ci, grado, materia_id) VALUES (?, ?, ?, ?, ?, ?)",
+        [userRes.insertId, nombreU, codigo, ci || null, gradoU, primaryMateria], (err2, docRes) => {
+          if (err2) return res.status(500).json(err2);
+          if (materiaIds.length === 0) return res.json({ message: "Docente registrado", codigo });
+
+          const values = materiaIds.map(mid => [docRes.insertId, mid]);
+          db.query("INSERT INTO docente_materias (docente_id, materia_id) VALUES ?", [values], (err3) => {
+            if (err3) return res.status(500).json(err3);
+            res.json({ message: "Docente registrado", codigo });
+          });
+        });
+      });
     });
   });
 });
 
-// Actualizar docente (Incluyendo materia_id)
+// Actualizar docente y sus materias (relación N a N)
 app.put('/api/admin/docentes/:id', (req, res) => {
-  const { nombre, grado, materia_id } = req.body;
-  const mid = materia_id && materia_id !== '' ? parseInt(materia_id) : null;
+  const { nombre, grado } = req.body;
+  const materiaIds = (req.body.materia_ids || []).map(Number).filter(Boolean);
+  const nombreU = (nombre || '').trim().toUpperCase();
+  const gradoU = (grado || '').trim().toUpperCase();
+  const primaryMateria = materiaIds.length > 0 ? materiaIds[0] : null;
+  const docenteId = req.params.id;
 
-  const sql = "UPDATE docentes SET nombre = ?, grado = ?, materia_id = ? WHERE id = ?";
-  db.query(sql, [nombre, grado, mid, req.params.id], (err) => {
-    if (err) return res.status(500).json(err);
-    res.json({ message: "Docente actualizado correctamente" });
+  materiasSinCupo(materiaIds, docenteId, (cupoErr, llenas) => {
+    if (cupoErr) return res.status(500).json(cupoErr);
+    if (llenas.length > 0) return res.status(400).json({ message: `Una materia ya tiene el máximo de ${MAX_DOCENTES_POR_MATERIA} docentes` });
+
+    db.query("UPDATE docentes SET nombre = ?, grado = ?, materia_id = ? WHERE id = ?",
+    [nombreU, gradoU, primaryMateria, docenteId], (err) => {
+      if (err) return res.status(500).json(err);
+      // Reemplazamos las materias del docente
+      db.query("DELETE FROM docente_materias WHERE docente_id = ?", [docenteId], (delErr) => {
+        if (delErr) return res.status(500).json(delErr);
+        if (materiaIds.length === 0) return res.json({ message: "Docente actualizado correctamente" });
+        const values = materiaIds.map(mid => [docenteId, mid]);
+        db.query("INSERT INTO docente_materias (docente_id, materia_id) VALUES ?", [values], (insErr) => {
+          if (insErr) return res.status(500).json(insErr);
+          res.json({ message: "Docente actualizado correctamente" });
+        });
+      });
+    });
   });
 });
 
@@ -180,10 +260,35 @@ app.delete('/api/admin/docentes/:id', (req, res) => {
 
 // --- 4. CONFIGURACIÓN DE PARÁMETROS ACADÉMICOS ---
 app.post('/api/admin/materias', (req, res) => {
-  const { nombre } = req.body;
-  db.query("INSERT INTO materias (nombre, activa) VALUES (?, 1)", [nombre], (err) => {
+  const { nombre, ciclo } = req.body;
+  const nombreU = (nombre || '').trim().toUpperCase();
+  db.query("INSERT INTO materias (nombre, activa, ciclo) VALUES (?, 1, ?)", [nombreU, ciclo || 'PRIMER CICLO'], (err) => {
     if (err) return res.status(500).json(err);
     res.json({ message: "Materia creada" });
+  });
+});
+
+// Eliminar materia (las notas/evaluaciones/relaciones asociadas se borran en cascada)
+app.delete('/api/admin/materias/:id', (req, res) => {
+  db.query("DELETE FROM materias WHERE id = ?", [req.params.id], (err) => {
+    if (err) return res.status(500).json(err);
+    res.json({ message: "Materia eliminada" });
+  });
+});
+
+// Asignaciones materia->docente (cada docente que dicta cada materia). Para asignar cursantes.
+app.get('/api/asignaciones', (req, res) => {
+  const sql = `
+    SELECT dm.id AS dm_id, dm.materia_id, dm.docente_id,
+           m.nombre AS materia, m.ciclo,
+           CONCAT_WS(' ', d.grado, d.nombre) AS docente
+    FROM docente_materias dm
+    JOIN materias m ON dm.materia_id = m.id
+    JOIN docentes d ON dm.docente_id = d.id
+    ORDER BY m.nombre, d.nombre`;
+  db.query(sql, (err, result) => {
+    if (err) return res.status(500).json(err);
+    res.json(result);
   });
 });
 
@@ -297,16 +402,53 @@ app.get('/api/docentes/estrellas/:id', (req, res) => {
   });
 });
 
-app.get('/api/docentes/materia-actual/:id', (req, res) => {
-  db.query("SELECT * FROM materias WHERE activa = 1 LIMIT 1", (err, matResult) => {
+// Materias que dicta un docente (relación N a N)
+app.get('/api/docentes/:docenteId/materias', (req, res) => {
+  const sql = `
+    SELECT m.id, m.nombre, m.ciclo, m.activa
+    FROM docente_materias dm
+    JOIN materias m ON dm.materia_id = m.id
+    WHERE dm.docente_id = ?
+    ORDER BY m.nombre`;
+  db.query(sql, [req.params.docenteId], (err, result) => {
     if (err) return res.status(500).json(err);
-    if (matResult.length === 0) {
-      return res.json({ materia: null, estudiantes: [] });
-    }
-    const materia = matResult[0];
-    db.query("SELECT id, nombre, grado, ciclo FROM estudiantes ORDER BY nombre ASC", (err2, estResult) => {
-      if (err2) return res.status(500).json(err2);
-      res.json({ materia: materia, estudiantes: estResult });
+    res.json(result);
+  });
+});
+
+// Cursantes de una materia asignados a ESTE docente (para su planilla)
+app.get('/api/docentes/:docenteId/materia/:materiaId/estudiantes', (req, res) => {
+  const sql = "SELECT id, nombre, grado, ciclo FROM estudiantes WHERE materia_id = ? AND docente_id = ? ORDER BY nombre ASC";
+  db.query(sql, [req.params.materiaId, req.params.docenteId], (err, result) => {
+    if (err) return res.status(500).json(err);
+    res.json(result);
+  });
+});
+
+// El cursante evalúa al docente de su materia (guarda una fila por criterio)
+app.post('/api/estudiantes/evaluar-docente', (req, res) => {
+  const { estudiante_id, materia_id, calificaciones } = req.body;
+  const entries = Object.entries(calificaciones || {});
+  if (!estudiante_id || !materia_id || entries.length === 0) {
+    return res.status(400).json({ message: "Datos de evaluación incompletos" });
+  }
+  // El cursante evalúa a SU docente asignado
+  db.query("SELECT docente_id FROM estudiantes WHERE id = ?", [estudiante_id], (err, rows) => {
+    if (err) return res.status(500).json(err);
+    if (rows.length === 0 || !rows[0].docente_id) return res.status(400).json({ message: "El cursante no tiene docente asignado" });
+    const docente_id = rows[0].docente_id;
+
+    // Borramos evaluaciones previas de este cursante para este docente/materia (evita duplicar)
+    db.query("DELETE FROM evaluaciones_docentes WHERE estudiante_id = ? AND docente_id = ? AND materia_id = ?",
+    [estudiante_id, docente_id, materia_id], (delErr) => {
+      if (delErr) return res.status(500).json(delErr);
+
+      const values = entries.map(([criterio_id, puntuacion]) => [estudiante_id, docente_id, materia_id, criterio_id, puntuacion]);
+      db.query("INSERT INTO evaluaciones_docentes (estudiante_id, docente_id, materia_id, criterio_id, puntuacion) VALUES ?",
+      [values], (insErr) => {
+        if (insErr) return res.status(500).json(insErr);
+        res.json({ message: "Evaluación registrada" });
+      });
     });
   });
 });
@@ -370,9 +512,12 @@ app.get('/api/admin/criterios', (req, res) => {
 
 app.get('/api/estudiantes/perfil/:id', (req, res) => {
   const sql = `
-    SELECT e.*, m.nombre as nombre_materia 
-    FROM estudiantes e 
-    LEFT JOIN materias m ON e.materia_id = m.id 
+    SELECT e.*,
+      m.nombre AS nombre_materia_activa,
+      (SELECT CONCAT_WS(' ', d.grado, d.nombre)
+         FROM docentes d WHERE d.id = e.docente_id) AS nombre_docente_actual
+    FROM estudiantes e
+    LEFT JOIN materias m ON e.materia_id = m.id
     WHERE e.usuario_id = ?`;
   db.query(sql, [req.params.id], (err, result) => {
     if (err) return res.status(500).json(err);
@@ -398,5 +543,5 @@ app.get('/api/notas/estudiante/:id', (req, res) => {
   });
 });
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`🚀 Servidor ECEME activo e integrado en puerto ${PORT}`));

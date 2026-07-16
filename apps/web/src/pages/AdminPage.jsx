@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
-import { ShieldAlert, Users, BookOpen, Settings, FileDown, RefreshCw, Plus, Trash2, Edit3, Save, X, GraduationCap, BookMarked } from 'lucide-react';
+import { ShieldAlert, Users, BookOpen, Settings, FileDown, RefreshCw, Plus, Trash2, Edit3, Save, X, GraduationCap, BookMarked, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import Header from '@/components/Header.jsx';
 import Footer from '@/components/Footer.jsx';
 import api from '@/lib/api'; 
@@ -22,26 +22,41 @@ const AdminPage = () => {
   
   const [estudiantes, setEstudiantes] = useState([]);
   const [docentes, setDocentes] = useState([]);
+  const [asignaciones, setAsignaciones] = useState([]);
+  const [materiaToDelete, setMateriaToDelete] = useState('');
 
-  // Estados de formularios inicializados con materia_id
-  const [alumnoForm, setAlumnoForm] = useState({ nombre: '', codigo: '', grado: '', ciclo: 'PRIMER CICLO', materia_id: '' });
-  const [docenteForm, setDocenteForm] = useState({ nombre: '', codigo: '', grado: '', materia_id: '' });
+  // Estados de formularios (el código se genera automáticamente en el backend)
+  const [alumnoForm, setAlumnoForm] = useState({ nombre: '', ci: '', grado: '', ciclo: 'PRIMER CICLO', asignacion_id: '', materia_id: '', docente_id: '' });
+  const [docenteForm, setDocenteForm] = useState({ nombre: '', ci: '', grado: '', materia_id: '' });
+
+  const toggleMateria = (arr, id) => (arr || []).includes(id) ? arr.filter(x => x !== id) : [...(arr || []), id];
+  // Docentes que ya dictan una materia (según su lista de materia_ids)
+  const docentesDeMateria = (materiaId) => docentes.filter(d =>
+    d.materia_ids && String(d.materia_ids).split(',').map(Number).includes(Number(materiaId)));
   const [materiaName, setMateriaName] = useState('');
+  const [materiaCiclo, setMateriaCiclo] = useState('PRIMER CICLO');
   const [comandanteName, setComandanteName] = useState('');
 
-  const [editingId, setEditingId] = useState(null); 
+  const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
+
+  // Directorio de personal: pestaña, buscador y paginación
+  const [dirTab, setDirTab] = useState('estudiante');
+  const [dirSearch, setDirSearch] = useState('');
+  const [dirPage, setDirPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [matRes, critRes, confRes, notasRes, estRes, docRes] = await Promise.all([
+      const [matRes, critRes, confRes, notasRes, estRes, docRes, asigRes] = await Promise.all([
         api.get('/materias'),
         api.get('/criterios'),
         api.get('/configuracion'),
         api.get('/notas/consolidado'),
         api.get('/admin/estudiantes'),
-        api.get('/admin/docentes')
+        api.get('/admin/docentes'),
+        api.get('/asignaciones')
       ]);
 
       setMaterias(matRes.data);
@@ -50,6 +65,7 @@ const AdminPage = () => {
       setNotasPendientes(notasRes.data);
       setEstudiantes(estRes.data);
       setDocentes(docRes.data);
+      setAsignaciones(asigRes.data);
     } catch (err) {
       console.error(err);
       toast.error('ERROR AL SINCRONIZAR DATOS');
@@ -74,7 +90,10 @@ const AdminPage = () => {
   const handleEditClick = (user, type) => {
     setEditingId(user.id);
     // Convertimos materia_id a string para que el componente Select lo reconozca
-    setEditForm({ ...user, type, materia_id: user.materia_id?.toString() || "" });
+    const materiaIds = type === 'docente' && user.materia_ids
+      ? String(user.materia_ids).split(',').map(Number)
+      : [];
+    setEditForm({ ...user, type, materia_id: user.materia_id?.toString() || "", materia_ids: materiaIds });
   };
 
   const handleUpdateUser = async () => {
@@ -101,26 +120,39 @@ const AdminPage = () => {
     }
   };
 
+  const ciValido = (ci) => /^\d{6,9}$/.test(ci);
+
   const handleAddAlumno = async e => {
     e.preventDefault();
+    if (!ciValido(alumnoForm.ci)) return toast.error('EL CI DEBE TENER ENTRE 6 Y 9 DÍGITOS');
     if (!alumnoForm.materia_id) return toast.error('SELECCIONE UNA MATERIA');
     try {
-      await api.post('/admin/estudiantes', { ...alumnoForm, password: "ECEME2026" });
-      toast.success(`CURSANTE REGISTRADO CORRECTAMENTE`);
-      setAlumnoForm({ nombre: '', codigo: '', grado: '', ciclo: 'PRIMER CICLO', materia_id: '' });
+      const res = await api.post('/admin/estudiantes', { ...alumnoForm, password: "ECEME2026" });
+      toast.success(`CURSANTE REGISTRADO: ${res.data.codigo}`);
+      setAlumnoForm({ nombre: '', ci: '', grado: '', ciclo: 'PRIMER CICLO', asignacion_id: '', materia_id: '', docente_id: '' });
       fetchData();
     } catch (err) { toast.error('ERROR AL REGISTRAR'); }
   };
 
   const handleAddDocente = async e => {
     e.preventDefault();
+    if (!ciValido(docenteForm.ci)) return toast.error('EL CI DEBE TENER ENTRE 6 Y 9 DÍGITOS');
     if (!docenteForm.materia_id) return toast.error('SELECCIONE UNA MATERIA');
     try {
-      await api.post('/admin/docentes', { ...docenteForm, password: "ECEME2026" });
-      toast.success(`DOCENTE REGISTRADO CORRECTAMENTE`);
-      setDocenteForm({ nombre: '', codigo: '', grado: '', materia_id: '' });
+      const res = await api.post('/admin/docentes', { ...docenteForm, password: "ECEME2026" });
+      toast.success(`DOCENTE REGISTRADO: ${res.data.codigo}`);
+      setDocenteForm({ nombre: '', ci: '', grado: '', materia_id: '' });
       fetchData();
-    } catch (err) { toast.error('ERROR AL REGISTRAR'); }
+    } catch (err) { toast.error(err.response?.data?.message || 'ERROR AL REGISTRAR'); }
+  };
+
+  const handleDeleteMateria = async (id) => {
+    if (!window.confirm('¿ELIMINAR ESTA MATERIA? SE BORRARÁN SUS NOTAS Y EVALUACIONES ASOCIADAS.')) return;
+    try {
+      await api.delete(`/admin/materias/${id}`);
+      toast.success('MATERIA ELIMINADA');
+      fetchData();
+    } catch (err) { toast.error('ERROR AL ELIMINAR'); }
   };
 
   const handleUpdateComandante = async () => {
@@ -134,12 +166,35 @@ const AdminPage = () => {
   const handleAddMateria = async () => {
     if (!materiaName) return;
     try {
-      await api.post('/admin/materias', { nombre: materiaName });
+      await api.post('/admin/materias', { nombre: materiaName, ciclo: materiaCiclo });
       toast.success('MATERIA CREADA');
       setMateriaName('');
       fetchData();
     } catch (err) { toast.error('ERROR'); }
   };
+
+  // --- Directorio: filtrado por pestaña + buscador + paginación (10 por página) ---
+  const dirSource = dirTab === 'docente'
+    ? docentes.map(d => ({ ...d, type: 'docente' }))
+    : estudiantes.map(e => ({ ...e, type: 'estudiante' }));
+  const materiaTextoDe = (u) => u.type === 'docente'
+    ? (u.materias_nombres || '')
+    : (materias.find(m => m.id == u.materia_id)?.nombre || '');
+  const dirFiltered = dirSource.filter(u => {
+    const q = dirSearch.trim().toLowerCase();
+    if (!q) return true;
+    return (u.nombre || '').toLowerCase().includes(q)
+      || (u.codigo || '').toLowerCase().includes(q)
+      || (u.ci || '').toLowerCase().includes(q)
+      || (u.ciclo || '').toLowerCase().includes(q)
+      || materiaTextoDe(u).toLowerCase().includes(q);
+  });
+  const dirTotalPages = Math.max(1, Math.ceil(dirFiltered.length / PAGE_SIZE));
+  const dirCurrentPage = Math.min(dirPage, dirTotalPages);
+  const dirPageItems = dirFiltered.slice((dirCurrentPage - 1) * PAGE_SIZE, dirCurrentPage * PAGE_SIZE);
+
+  const changeDirTab = (tab) => { setDirTab(tab); setDirPage(1); };
+  const changeDirSearch = (v) => { setDirSearch(v); setDirPage(1); };
 
   const generateNominalPDF = () => {
     const doc = new jsPDF();
@@ -170,10 +225,10 @@ const AdminPage = () => {
                 <h3 className="font-black mb-6 uppercase text-xs tracking-widest text-muted-foreground">Registro de Cursante</h3>
                 <form onSubmit={handleAddAlumno} className="space-y-4">
                   <Input placeholder="NOMBRE COMPLETO" value={alumnoForm.nombre} onChange={e => setAlumnoForm({...alumnoForm, nombre: e.target.value})} className="font-bold uppercase" required />
-                  <Input placeholder="CÓDIGO" value={alumnoForm.codigo} onChange={e => setAlumnoForm({...alumnoForm, codigo: e.target.value})} className="font-bold uppercase" required />
+                  <Input placeholder="CARNET DE IDENTIDAD (CI)" inputMode="numeric" value={alumnoForm.ci} onChange={e => setAlumnoForm({...alumnoForm, ci: e.target.value.replace(/\D/g, '')})} maxLength={9} className="font-bold" required />
                   <Input placeholder="GRADO" value={alumnoForm.grado} onChange={e => setAlumnoForm({...alumnoForm, grado: e.target.value})} className="font-bold uppercase" required />
-                  
-                  <Select value={alumnoForm.ciclo} onValueChange={v => setAlumnoForm({...alumnoForm, ciclo: v})}>
+
+                  <Select value={alumnoForm.ciclo} onValueChange={v => setAlumnoForm({...alumnoForm, ciclo: v, asignacion_id: '', materia_id: '', docente_id: ''})}>
                     <SelectTrigger className="font-bold"><SelectValue placeholder="CICLO" /></SelectTrigger>
                     <SelectContent>
                         <SelectItem value="PRIMER CICLO">PRIMER CICLO</SelectItem>
@@ -181,15 +236,28 @@ const AdminPage = () => {
                     </SelectContent>
                   </Select>
 
-                  <Select value={alumnoForm.materia_id} onValueChange={v => setAlumnoForm({...alumnoForm, materia_id: v})}>
-                    <SelectTrigger className="font-bold border-primary/40"><SelectValue placeholder="ASIGNAR MATERIA" /></SelectTrigger>
+                  <Select
+                    value={alumnoForm.asignacion_id}
+                    onValueChange={v => {
+                      const a = asignaciones.find(x => String(x.dm_id) === v);
+                      setAlumnoForm({...alumnoForm, asignacion_id: v, materia_id: a ? String(a.materia_id) : '', docente_id: a ? String(a.docente_id) : ''});
+                    }}>
+                    <SelectTrigger className="font-bold border-primary/40 h-auto"><SelectValue placeholder="ASIGNAR MATERIA Y DOCENTE" /></SelectTrigger>
                     <SelectContent>
-                      {materias.map(m => (
-                        <SelectItem key={m.id} value={m.id.toString()}>{m.nombre}</SelectItem>
+                      {asignaciones.filter(a => a.ciclo === alumnoForm.ciclo).length === 0 ? (
+                        <div className="px-3 py-2 text-[10px] font-bold text-muted-foreground uppercase">SIN MATERIAS CON DOCENTE EN ESTE CICLO</div>
+                      ) : asignaciones.filter(a => a.ciclo === alumnoForm.ciclo).map(a => (
+                        <SelectItem key={a.dm_id} value={String(a.dm_id)}>
+                          <div className="flex flex-col text-left">
+                            <span className="font-bold uppercase text-xs">{a.materia}</span>
+                            <span className="text-[9px] text-muted-foreground uppercase">→ {a.docente}</span>
+                          </div>
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
 
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">El código (CUR-XXX) se genera automáticamente</p>
                   <Button type="submit" className="w-full bg-secondary text-secondary-foreground font-black uppercase shadow-lg">Registrar</Button>
                 </form>
               </div>
@@ -200,18 +268,30 @@ const AdminPage = () => {
                 <h3 className="font-black mb-6 uppercase text-xs tracking-widest text-muted-foreground">Registro de Docente</h3>
                 <form onSubmit={handleAddDocente} className="space-y-4">
                   <Input placeholder="NOMBRE COMPLETO" value={docenteForm.nombre} onChange={e => setDocenteForm({...docenteForm, nombre: e.target.value})} className="font-bold uppercase" required />
-                  <Input placeholder="CÓDIGO" value={docenteForm.codigo} onChange={e => setDocenteForm({...docenteForm, codigo: e.target.value})} className="font-bold uppercase" required />
+                  <Input placeholder="CARNET DE IDENTIDAD (CI)" inputMode="numeric" value={docenteForm.ci} onChange={e => setDocenteForm({...docenteForm, ci: e.target.value.replace(/\D/g, '')})} maxLength={9} className="font-bold" required />
                   <Input placeholder="GRADO" value={docenteForm.grado} onChange={e => setDocenteForm({...docenteForm, grado: e.target.value})} className="font-bold uppercase" required />
-                  
-                  <Select value={docenteForm.materia_id} onValueChange={v => setDocenteForm({...docenteForm, materia_id: v})}>
-                    <SelectTrigger className="font-bold border-primary/40"><SelectValue placeholder="ASIGNAR MATERIA" /></SelectTrigger>
-                    <SelectContent>
-                      {materias.map(m => (
-                        <SelectItem key={m.id} value={m.id.toString()}>{m.nombre}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
 
+                  <div className="space-y-1">
+                    <Select value={docenteForm.materia_id} onValueChange={v => setDocenteForm({...docenteForm, materia_id: v})}>
+                      <SelectTrigger className="font-bold border-primary/40"><SelectValue placeholder="ASIGNAR MATERIA" /></SelectTrigger>
+                      <SelectContent>
+                        {materias.map(m => (
+                          <SelectItem key={m.id} value={m.id.toString()}>
+                            {m.nombre} · {m.ciclo === 'PRIMER CICLO' ? '1ER' : '2DO'}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {docenteForm.materia_id && (
+                      <p className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground pl-1">
+                        {docentesDeMateria(docenteForm.materia_id).length > 0
+                          ? `DOCENTE(S): ${docentesDeMateria(docenteForm.materia_id).map(d => d.nombre).join(', ')} (${docentesDeMateria(docenteForm.materia_id).length}/3)`
+                          : 'DOCENTE AÚN SIN ASIGNAR'}
+                      </p>
+                    )}
+                  </div>
+
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground">El código (DOC-XXX) se genera automáticamente</p>
                   <Button type="submit" className="w-full bg-accent text-accent-foreground font-black uppercase shadow-lg">Registrar</Button>
                 </form>
               </div>
@@ -227,9 +307,39 @@ const AdminPage = () => {
                 </div>
                 <div className="bg-card border-2 border-border p-6">
                   <Label className="text-[10px] font-black uppercase tracking-widest mb-2 block">Nueva Materia Académica</Label>
-                  <div className="flex space-x-2">
-                    <Input value={materiaName} onChange={e => setMateriaName(e.target.value)} className="font-bold" placeholder="NOMBRE..." />
-                    <Button onClick={handleAddMateria} className="bg-primary"><Plus/></Button>
+                  <div className="space-y-2">
+                    <Select value={materiaCiclo} onValueChange={setMateriaCiclo}>
+                      <SelectTrigger className="font-bold"><SelectValue placeholder="CICLO" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="PRIMER CICLO">PRIMER CICLO</SelectItem>
+                        <SelectItem value="SEGUNDO CICLO">SEGUNDO CICLO</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <div className="flex space-x-2">
+                      <Input value={materiaName} onChange={e => setMateriaName(e.target.value)} className="font-bold" placeholder="NOMBRE..." />
+                      <Button onClick={handleAddMateria} className="bg-primary"><Plus/></Button>
+                    </div>
+
+                    {materias.length > 0 && (
+                      <div className="pt-2 border-t-2 border-border flex space-x-2">
+                        <Select value={materiaToDelete} onValueChange={setMateriaToDelete}>
+                          <SelectTrigger className="font-bold text-xs"><SelectValue placeholder="ELIMINAR MATERIA..." /></SelectTrigger>
+                          <SelectContent>
+                            {materias.map(m => (
+                              <SelectItem key={m.id} value={String(m.id)}>
+                                {m.nombre} · {m.ciclo === 'PRIMER CICLO' ? '1ER' : '2DO'}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          onClick={() => { if (materiaToDelete) { handleDeleteMateria(Number(materiaToDelete)); setMateriaToDelete(''); } }}
+                          disabled={!materiaToDelete}
+                          className="bg-destructive shrink-0 disabled:opacity-40">
+                          <Trash2 size={16} />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -237,9 +347,34 @@ const AdminPage = () => {
 
             {/* Directorio de Personal Militar */}
             <div className="bg-card border-2 border-border p-6 shadow-xl">
-              <h2 className="font-black uppercase mb-8 flex items-center text-xl tracking-tighter">
+              <h2 className="font-black uppercase mb-6 flex items-center text-xl tracking-tighter">
                 <Users className="mr-3 text-primary" size={28}/> Directorio de Personal
               </h2>
+
+              {/* Controles: pestañas + buscador */}
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => changeDirTab('estudiante')}
+                    className={`font-black text-xs uppercase h-10 rounded-none ${dirTab === 'estudiante' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+                    <GraduationCap size={16} className="mr-2" /> Cursantes ({estudiantes.length})
+                  </Button>
+                  <Button
+                    onClick={() => changeDirTab('docente')}
+                    className={`font-black text-xs uppercase h-10 rounded-none ${dirTab === 'docente' ? 'bg-accent text-accent-foreground' : 'bg-muted text-muted-foreground'}`}>
+                    <BookMarked size={16} className="mr-2" /> Docentes ({docentes.length})
+                  </Button>
+                </div>
+                <div className="relative w-full md:w-72">
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={dirSearch}
+                    onChange={e => changeDirSearch(e.target.value)}
+                    placeholder="BUSCAR POR NOMBRE, CÓDIGO, CI, MATERIA O CICLO..."
+                    className="pl-9 font-bold text-xs uppercase" />
+                </div>
+              </div>
+
               <div className="overflow-x-auto">
                 <table className="military-table w-full">
                   <thead>
@@ -247,12 +382,16 @@ const AdminPage = () => {
                       <th className="text-[10px] uppercase">TIPO</th>
                       <th className="text-left">GRADO Y NOMBRE COMPLETO</th>
                       <th className="text-left">CÓDIGO</th>
+                      <th className="text-left">CI</th>
+                      <th className="text-left">CICLO</th>
                       <th className="text-left">MATERIA ASIGNADA</th>
                       <th className="text-center">ACCIONES</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {[...docentes.map(d => ({...d, type: 'docente'})), ...estudiantes.map(e => ({...e, type: 'estudiante'}))].map(user => (
+                    {dirPageItems.length === 0 ? (
+                      <tr><td colSpan="7" className="text-center p-12 font-bold text-muted-foreground tracking-widest uppercase">Sin resultados</td></tr>
+                    ) : dirPageItems.map(user => (
                       <tr key={`${user.type}-${user.id}`} className="hover:bg-muted/30 transition-colors">
                         <td className="text-[9px] font-black uppercase text-muted-foreground">{user.type}</td>
                         <td className="py-4">
@@ -266,21 +405,42 @@ const AdminPage = () => {
                           )}
                         </td>
                         <td className="text-xs font-mono font-bold">{user.codigo}</td>
+                        <td className="text-xs font-bold">{user.ci || '—'}</td>
+                        <td className="text-[10px] font-bold uppercase text-muted-foreground">{user.type === 'docente' ? '—' : (user.ciclo || '—')}</td>
                         <td>
                            {editingId === user.id ? (
-                             <Select value={editForm.materia_id} onValueChange={v => setEditForm({...editForm, materia_id: v})}>
-                                <SelectTrigger className="h-8 text-[10px] font-black uppercase border-2">
-                                    <SelectValue placeholder="CAMBIAR MATERIA" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {materias.map(m => (
-                                        <SelectItem key={m.id} value={m.id.toString()}>{m.nombre}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                             </Select>
+                             editForm.type === 'docente' ? (
+                               <div className="flex flex-wrap gap-1 max-w-[240px]">
+                                 {materias.map(m => {
+                                   const active = (editForm.materia_ids || []).includes(m.id);
+                                   return (
+                                     <button
+                                       type="button"
+                                       key={m.id}
+                                       onClick={() => setEditForm({...editForm, materia_ids: toggleMateria(editForm.materia_ids, m.id)})}
+                                       className={`text-[8px] font-black uppercase px-2 py-1 border-2 ${active ? 'bg-accent text-accent-foreground border-accent' : 'bg-background text-muted-foreground border-border'}`}>
+                                       {m.nombre}
+                                     </button>
+                                   );
+                                 })}
+                               </div>
+                             ) : (
+                               <Select value={editForm.materia_id} onValueChange={v => setEditForm({...editForm, materia_id: v})}>
+                                  <SelectTrigger className="h-8 text-[10px] font-black uppercase border-2">
+                                      <SelectValue placeholder="CAMBIAR MATERIA" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                      {materias.filter(m => m.ciclo === editForm.ciclo).map(m => (
+                                          <SelectItem key={m.id} value={m.id.toString()}>{m.nombre}</SelectItem>
+                                      ))}
+                                  </SelectContent>
+                               </Select>
+                             )
                           ) : (
                             <span className="text-[10px] font-black text-primary uppercase bg-primary/10 px-2 py-1 rounded-sm">
-                                {materias.find(m => m.id == user.materia_id)?.nombre || 'SIN ASIGNACIÓN'}
+                                {user.type === 'docente'
+                                  ? (user.materias_nombres || 'SIN ASIGNACIÓN')
+                                  : (materias.find(m => m.id == user.materia_id)?.nombre || 'SIN ASIGNACIÓN')}
                             </span>
                           )}
                         </td>
@@ -301,6 +461,29 @@ const AdminPage = () => {
                     ))}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Paginación */}
+              <div className="flex items-center justify-between mt-6 pt-4 border-t-2 border-border">
+                <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  {dirFiltered.length} registro(s) · Página {dirCurrentPage} de {dirTotalPages}
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => setDirPage(p => Math.max(1, p - 1))}
+                    disabled={dirCurrentPage <= 1}
+                    variant="outline"
+                    className="h-9 rounded-none border-2 font-black text-xs uppercase disabled:opacity-40">
+                    <ChevronLeft size={16} className="mr-1" /> Anterior
+                  </Button>
+                  <Button
+                    onClick={() => setDirPage(p => Math.min(dirTotalPages, p + 1))}
+                    disabled={dirCurrentPage >= dirTotalPages}
+                    variant="outline"
+                    className="h-9 rounded-none border-2 font-black text-xs uppercase disabled:opacity-40">
+                    Siguiente <ChevronRight size={16} className="ml-1" />
+                  </Button>
+                </div>
               </div>
             </div>
 

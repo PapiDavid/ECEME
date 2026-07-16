@@ -8,62 +8,45 @@ import api from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 
 const DocentePage = () => {
   const { currentUser } = useAuth();
   const [docente, setDocente] = useState(null);
-  const [materiaData, setMateriaData] = useState(null);
+  const [materias, setMaterias] = useState([]);
+  const [selectedMateriaId, setSelectedMateriaId] = useState('');
   const [estudiantes, setEstudiantes] = useState([]);
   const [evalAvg, setEvalAvg] = useState(0);
-  
+
   const [notasInputs, setNotasInputs] = useState({});
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const selectedMateria = materias.find(m => String(m.id) === String(selectedMateriaId));
+
+  // 1. Cargar perfil, estrellas y la lista de materias que dicta el docente
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchDocente = async () => {
       if (!currentUser?.id) return;
-  
       try {
         setLoading(true);
-        // 1. Perfil del docente
         const docRes = await api.get(`/docentes/perfil/${currentUser.id}`);
-    
         if (docRes.data) {
           const docData = docRes.data;
           setDocente(docData);
 
-          // 2. Estrellas y Materia Asignada (Endpoint unificado)
-          const [ratingRes, materiaRes] = await Promise.all([
+          const [ratingRes, matRes] = await Promise.all([
             api.get(`/docentes/estrellas/${docData.id}`),
-            api.get(`/docentes/materia-actual/${docData.id}`)
+            api.get(`/docentes/${docData.id}/materias`)
           ]);
-
           setEvalAvg(Number(ratingRes.data.promedio) || 0);
-      
-          // Verificamos la materia que viene del objeto de respuesta
-          const currentMateria = materiaRes.data.materia; 
-          const listaEstudiantes = materiaRes.data.estudiantes;
-      
-          if (currentMateria && currentMateria.id) {
-            setMateriaData(currentMateria);
-            setEstudiantes(listaEstudiantes);
+          setMaterias(matRes.data);
 
-            // 3. Obtenemos las notas que ya existen en la DB para este docente/materia
-            const notasRes = await api.get(`/notas/docente/${docData.id}/${currentMateria.id}`);
-
-            // 4. Mapeamos los datos a los inputs
-            const inputsMap = {};
-            listaEstudiantes.forEach(e => {
-              const existing = notasRes.data.find(n => n.estudiante_id === e.id);
-              inputsMap[e.id] = {
-                parcial_1: existing ? existing.parcial_1 : '',
-                parcial_final: existing ? existing.parcial_final : '',
-                trabajos: existing ? existing.trabajos : '',
-              };
-            });
-            setNotasInputs(inputsMap);
+          // Seleccionamos por defecto la materia activa; si no, la primera
+          if (matRes.data.length > 0) {
+            const activa = matRes.data.find(m => m.activa === 1);
+            setSelectedMateriaId(String((activa || matRes.data[0]).id));
           }
         }
       } catch (err) {
@@ -73,9 +56,38 @@ const DocentePage = () => {
         setLoading(false);
       }
     };
-
-    fetchData();
+    fetchDocente();
   }, [currentUser]);
+
+  // 2. Cargar cursantes + notas cada vez que cambia la materia seleccionada
+  useEffect(() => {
+    const fetchEstudiantes = async () => {
+      if (!docente || !selectedMateriaId) { setEstudiantes([]); setNotasInputs({}); return; }
+      try {
+        const [estRes, notasRes] = await Promise.all([
+          api.get(`/docentes/${docente.id}/materia/${selectedMateriaId}/estudiantes`),
+          api.get(`/notas/docente/${docente.id}/${selectedMateriaId}`)
+        ]);
+        const lista = estRes.data;
+        setEstudiantes(lista);
+
+        const inputsMap = {};
+        lista.forEach(e => {
+          const existing = notasRes.data.find(n => n.estudiante_id === e.id);
+          inputsMap[e.id] = {
+            parcial_1: existing ? existing.parcial_1 : '',
+            parcial_final: existing ? existing.parcial_final : '',
+            trabajos: existing ? existing.trabajos : '',
+          };
+        });
+        setNotasInputs(inputsMap);
+      } catch (err) {
+        console.error(err);
+        toast.error('ERROR AL CARGAR CURSANTES DE LA MATERIA');
+      }
+    };
+    fetchEstudiantes();
+  }, [docente, selectedMateriaId]);
 
   const handleNoteChange = (estId, field, value) => {
     // Validamos que la nota no pase de 100
@@ -87,14 +99,14 @@ const DocentePage = () => {
   };
 
   const handleSaveNotes = async () => {
-    if (!docente || !materiaData) return;
+    if (!docente || !selectedMateriaId) return;
     setSaving(true);
-    
+
     try {
       const planilla = estudiantes.map(est => ({
         estudiante_id: est.id,
         docente_id: docente.id,
-        materia_id: materiaData.id,
+        materia_id: Number(selectedMateriaId),
         ...notasInputs[est.id]
       })).filter(n => n.parcial_1 !== '' || n.parcial_final !== '' || n.trabajos !== '');
 
@@ -150,13 +162,34 @@ const DocentePage = () => {
                     <p className="text-[10px] text-muted-foreground font-bold tracking-widest uppercase mb-1">NOMBRE COMPLETO</p>
                     <p className="font-bold text-foreground text-sm uppercase">{docente.grado} {docente.nombre}</p>
                   </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground font-bold tracking-widest uppercase mb-1">CÓDIGO DE CÁTEDRA</p>
-                    <p className="font-bold text-foreground text-sm uppercase">{docente.codigo}</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground font-bold tracking-widest uppercase mb-1">CÓDIGO DE CÁTEDRA</p>
+                      <p className="font-bold text-foreground text-sm uppercase">{docente.codigo}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground font-bold tracking-widest uppercase mb-1">CI</p>
+                      <p className="font-bold text-foreground text-sm uppercase">{docente.ci || 'N/A'}</p>
+                    </div>
                   </div>
                   <div className="pt-2 border-t-2 border-border">
-                     <p className="text-[10px] text-muted-foreground font-bold tracking-widest uppercase mb-1">MATERIA ASIGNADA</p>
-                     <p className="font-extrabold text-primary text-sm uppercase">{materiaData?.nombre || 'SIN ASIGNACIÓN'}</p>
+                     <p className="text-[10px] text-muted-foreground font-bold tracking-widest uppercase mb-2">MATERIA ASIGNADA</p>
+                     {materias.length === 0 ? (
+                       <p className="font-extrabold text-primary text-sm uppercase">SIN ASIGNACIÓN</p>
+                     ) : (
+                       <Select value={selectedMateriaId} onValueChange={setSelectedMateriaId}>
+                         <SelectTrigger className="font-bold uppercase text-xs border-2 border-primary/40">
+                           <SelectValue placeholder="SELECCIONE MATERIA" />
+                         </SelectTrigger>
+                         <SelectContent>
+                           {materias.map(m => (
+                             <SelectItem key={m.id} value={String(m.id)} className="uppercase font-bold text-xs">
+                               {m.nombre} {m.activa === 1 ? '(EN CURSO)' : ''}
+                             </SelectItem>
+                           ))}
+                         </SelectContent>
+                       </Select>
+                     )}
                   </div>
                 </div>
               </div>
