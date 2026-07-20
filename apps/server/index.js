@@ -1,11 +1,16 @@
 const express = require('express');
 const mysql = require('mysql2');
 const cors = require('cors');
+const path = require('path');
+const bcrypt = require('bcryptjs');
+const { GENESIS_PREV, calcularHash } = require('./blockchain');
 require('dotenv').config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+// Sirve la página visual del blockchain en http://localhost:3001/blockchain.html
+app.use(express.static(path.join(__dirname, 'public')));
 
 const db = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
@@ -15,6 +20,17 @@ const db = mysql.createPool({
 });
 
 const MAX_DOCENTES_POR_MATERIA = 3;
+
+// Seguridad de contraseñas: bcrypt con 10 rondas de salt.
+const SALT_ROUNDS = 10;
+// Clave institucional que asigna el admin al restablecer credenciales.
+const PASSWORD_GENERICA = 'ECEME2026';
+
+// Quita el campo password antes de devolver un usuario al frontend.
+function usuarioSinPassword(u) {
+  const { password, ...resto } = u;
+  return resto;
+}
 
 // Devuelve (en el callback) las materias que ya llegaron al tope de docentes.
 // excludeDocenteId permite ignorar al propio docente al editar.
@@ -32,25 +48,39 @@ function materiasSinCupo(materiaIds, excludeDocenteId, cb) {
 }
 
 // --- 1. AUTENTICACIÓN ---
+// Se busca SOLO por identificador y la clave se valida con bcrypt.
+// El mensaje de error es genérico a propósito: no revela si el usuario existe.
 app.post('/api/login', (req, res) => {
   const { identificador, password } = req.body;
-  const sql = "SELECT * FROM usuarios WHERE identificador = ? AND password = ?";
-  db.query(sql, [identificador, password], (err, result) => {
+  const sql = "SELECT * FROM usuarios WHERE identificador = ?";
+  db.query(sql, [identificador], (err, result) => {
     if (err) return res.status(500).json(err);
-    if (result.length > 0) {
-      res.json({ user: result[0], token: 'sesion-activa-eceme' });
-    } else {
-      res.status(401).json({ message: "Usuario no encontrado o clave incorrecta" });
+    if (result.length === 0 || !bcrypt.compareSync(password || '', result[0].password)) {
+      return res.status(401).json({ message: "Usuario no encontrado o clave incorrecta" });
     }
+    res.json({ user: usuarioSinPassword(result[0]), token: 'sesion-activa-eceme' });
   });
 });
 
 app.post('/api/usuarios/cambiar-password', (req, res) => {
   const { usuario_id, nueva_password } = req.body;
+  const hash = bcrypt.hashSync(nueva_password, SALT_ROUNDS);
   const sql = "UPDATE usuarios SET password = ?, primer_login = 0 WHERE id = ?";
-  db.query(sql, [nueva_password, usuario_id], (err, result) => {
+  db.query(sql, [hash, usuario_id], (err, result) => {
     if (err) return res.status(500).json(err);
     res.json({ message: "Contraseña actualizada correctamente" });
+  });
+});
+
+// Recuperación de credenciales: el ADMIN restablece la clave de un usuario a la
+// genérica institucional y lo obliga a cambiarla en su próximo ingreso.
+app.post('/api/admin/usuarios/:usuarioId/reset-password', (req, res) => {
+  const hash = bcrypt.hashSync(PASSWORD_GENERICA, SALT_ROUNDS);
+  const sql = "UPDATE usuarios SET password = ?, primer_login = 1 WHERE id = ?";
+  db.query(sql, [hash, req.params.usuarioId], (err, result) => {
+    if (err) return res.status(500).json(err);
+    if (result.affectedRows === 0) return res.status(404).json({ message: "Usuario no encontrado" });
+    res.json({ message: "Contraseña restablecida", password_temporal: PASSWORD_GENERICA });
   });
 });
 
@@ -121,7 +151,7 @@ app.post('/api/admin/estudiantes', (req, res) => {
     if (errC) return res.status(500).json(errC);
     const codigo = 'CUR-' + String(rowsC[0].siguiente).padStart(3, '0');
 
-    db.query("INSERT INTO usuarios (identificador, password, rol, primer_login) VALUES (?, ?, 'alumno', 1)", [codigo, password], (err, userRes) => {
+    db.query("INSERT INTO usuarios (identificador, password, rol, primer_login) VALUES (?, ?, 'alumno', 1)", [codigo, bcrypt.hashSync(password, SALT_ROUNDS)], (err, userRes) => {
       if (err) return res.status(500).json(err);
 
       const mid = materia_id && materia_id !== '' ? parseInt(materia_id) : null;
@@ -197,7 +227,7 @@ app.post('/api/admin/docentes', (req, res) => {
       if (errC) return res.status(500).json(errC);
       const codigo = 'DOC-' + String(rowsC[0].siguiente).padStart(3, '0');
 
-      db.query("INSERT INTO usuarios (identificador, password, rol, primer_login) VALUES (?, ?, 'profe', 1)", [codigo, password], (err, userRes) => {
+      db.query("INSERT INTO usuarios (identificador, password, rol, primer_login) VALUES (?, ?, 'profe', 1)", [codigo, bcrypt.hashSync(password, SALT_ROUNDS)], (err, userRes) => {
         if (err) return res.status(500).json(err);
 
         const primaryMateria = materiaIds.length > 0 ? materiaIds[0] : null;
@@ -325,6 +355,201 @@ app.post('/api/notas/publicar-lote', (req, res) => {
   db.query("UPDATE notas SET publicado = 1", (err) => {
     if (err) return res.status(500).json(err);
     res.json({ message: "Tablero publicado" });
+  });
+});
+
+// ============================================================
+//  BLOCKCHAIN — cadena de actas (el CORE del proyecto)
+//  Al publicar un acta se congela en un bloque encadenado por SHA-256.
+//  Desde ese momento es inmutable: cualquier alteración rompe la cadena.
+// ============================================================
+
+// Devuelve el último bloque de la cadena (o null si está vacía).
+function ultimoBloque(cb) {
+  db.query("SELECT * FROM bloques ORDER BY indice DESC LIMIT 1", (err, rows) => {
+    if (err) return cb(err);
+    cb(null, rows[0] || null);
+  });
+}
+
+// Convierte una fila de notas en un registro de acta (notas como texto con 2
+// decimales para que el JSON sea estable y el hash siempre reproducible).
+function registroDeNota(n) {
+  return {
+    codigo: n.codigo,
+    estudiante: n.estudiante,
+    materia: n.materia,
+    parcial_1: Number(n.parcial_1).toFixed(2),
+    parcial_final: Number(n.parcial_final).toFixed(2),
+    trabajos: Number(n.trabajos).toFixed(2),
+    nota_final: Number(n.nota_final).toFixed(2)
+  };
+}
+
+// Inserta secuencialmente una lista de actas, encadenando cada bloque al anterior.
+function sellarActasSecuencial(actas, res) {
+  ultimoBloque((err, prevInicial) => {
+    if (err) return res.status(500).json(err);
+    let prev = prevInicial;
+    let i = 0;
+    (function siguiente() {
+      if (i >= actas.length) return res.json({ message: "Cadena generada", bloques_creados: actas.length });
+      const { materia_id, ciclo, acta } = actas[i];
+      const indice = prev ? prev.indice + 1 : 0;
+      const hashPrevio = prev ? prev.hash : GENESIS_PREV;
+      const hash = calcularHash(indice, materia_id, ciclo, acta, hashPrevio);
+      db.query("INSERT INTO bloques (indice, materia_id, ciclo, acta_json, hash_previo, hash) VALUES (?, ?, ?, ?, ?, ?)",
+        [indice, materia_id, ciclo, JSON.stringify(acta), hashPrevio, hash], (errI) => {
+          if (errI) return res.status(500).json(errI);
+          prev = { indice, hash };
+          i++;
+          siguiente();
+        });
+    })();
+  });
+}
+
+// --- Publicar un acta y sellarla en la cadena ---
+// Body opcional { materia_id }. Sin materia_id => acta general de todas las notas.
+app.post('/api/actas/publicar', (req, res) => {
+  const body = req.body || {};
+  const materiaId = body.materia_id ? parseInt(body.materia_id) : null;
+  let sql = `
+    SELECT e.codigo, e.nombre AS estudiante, e.ciclo,
+           n.materia_id, m.nombre AS materia,
+           n.parcial_1, n.parcial_final, n.trabajos, n.nota_final
+    FROM notas n
+    JOIN estudiantes e ON n.estudiante_id = e.id
+    JOIN materias m ON n.materia_id = m.id`;
+  const params = [];
+  if (materiaId) { sql += " WHERE n.materia_id = ?"; params.push(materiaId); }
+  sql += " ORDER BY e.nombre";
+
+  db.query(sql, params, (err, notas) => {
+    if (err) return res.status(500).json(err);
+    if (notas.length === 0) return res.status(400).json({ message: "No hay notas para publicar en esta acta" });
+
+    db.query("SELECT comandante_nombre, gestion FROM configuracion LIMIT 1", (errC, cfgRows) => {
+      if (errC) return res.status(500).json(errC);
+      const cfg = cfgRows[0] || { comandante_nombre: 'POR ASIGNAR', gestion: '2026' };
+      const ciclo = materiaId ? (notas[0].ciclo || null) : null;
+      const acta = {
+        materia: materiaId ? notas[0].materia : 'ACTA GENERAL',
+        ciclo,
+        gestion: cfg.gestion || '2026',
+        comandante: cfg.comandante_nombre || 'POR ASIGNAR',
+        sello_tiempo: new Date().toISOString(),
+        registros: notas.map(registroDeNota)
+      };
+
+      ultimoBloque((errU, prev) => {
+        if (errU) return res.status(500).json(errU);
+        const indice = prev ? prev.indice + 1 : 0;
+        const hashPrevio = prev ? prev.hash : GENESIS_PREV;
+        const hash = calcularHash(indice, materiaId, ciclo, acta, hashPrevio);
+        db.query("INSERT INTO bloques (indice, materia_id, ciclo, acta_json, hash_previo, hash) VALUES (?, ?, ?, ?, ?, ?)",
+          [indice, materiaId, ciclo, JSON.stringify(acta), hashPrevio, hash], (errI) => {
+            if (errI) return res.status(500).json(errI);
+            let upd = "UPDATE notas SET publicado = 1";
+            const uParams = [];
+            if (materiaId) { upd += " WHERE materia_id = ?"; uParams.push(materiaId); }
+            db.query(upd, uParams, (errUp) => {
+              if (errUp) return res.status(500).json(errUp);
+              res.json({ message: "Acta publicada y sellada en la cadena", indice, hash });
+            });
+          });
+      });
+    });
+  });
+});
+
+// --- Ver la cadena completa (bloques crudos) ---
+app.get('/api/blockchain', (req, res) => {
+  db.query("SELECT * FROM bloques ORDER BY indice ASC", (err, rows) => {
+    if (err) return res.status(500).json(err);
+    res.json(rows);
+  });
+});
+
+// --- Verificar la INTEGRIDAD de la cadena ---
+// Recalcula el hash de cada bloque y comprueba el encadenado con el anterior.
+app.get('/api/blockchain/verificar', (req, res) => {
+  db.query("SELECT * FROM bloques ORDER BY indice ASC", (err, rows) => {
+    if (err) return res.status(500).json(err);
+    let cadenaValida = true;
+    let primerError = null;
+    let hashPrevioEsperado = GENESIS_PREV;
+
+    const bloques = rows.map((b) => {
+      const acta = typeof b.acta_json === 'string' ? JSON.parse(b.acta_json) : b.acta_json;
+      const hashRecalculado = calcularHash(b.indice, b.materia_id, b.ciclo, acta, b.hash_previo);
+      const hashIntacto = hashRecalculado === b.hash;              // ¿los datos coinciden con su hash?
+      const enlaceIntacto = b.hash_previo === hashPrevioEsperado;  // ¿enlaza con el bloque anterior?
+      const valido = hashIntacto && enlaceIntacto;
+      if (!valido && cadenaValida) {
+        cadenaValida = false;
+        primerError = {
+          indice: b.indice,
+          motivo: !hashIntacto ? 'DATOS_ALTERADOS' : 'ENLACE_ROTO'
+        };
+      }
+      hashPrevioEsperado = b.hash; // el siguiente bloque debe apuntar a ESTE hash
+      return {
+        id: b.id, indice: b.indice, materia_id: b.materia_id, ciclo: b.ciclo,
+        acta, hash_previo: b.hash_previo, hash: b.hash,
+        hash_recalculado: hashRecalculado,
+        hash_intacto: hashIntacto, enlace_intacto: enlaceIntacto, valido,
+        creado_en: b.creado_en
+      };
+    });
+    res.json({ valida: cadenaValida, longitud: bloques.length, primer_error: primerError, bloques });
+  });
+});
+
+// ============================================================
+//  DEMO — la manipulación para la demostración se hace MANUALMENTE en MySQL
+//  (UPDATE directo sobre la tabla `bloques`); ver instrucciones en blockchain.html.
+// ============================================================
+
+// RECONSTRUIR la cadena de demostración: borra los bloques y vuelve a sellar
+//     un acta por cada materia que tenga notas.
+app.post('/api/blockchain/demo-reset', (req, res) => {
+  db.query("DELETE FROM bloques", (errDel) => {
+    if (errDel) return res.status(500).json(errDel);
+    db.query("SELECT comandante_nombre, gestion FROM configuracion LIMIT 1", (errC, cfgRows) => {
+      if (errC) return res.status(500).json(errC);
+      const cfg = cfgRows[0] || { comandante_nombre: 'POR ASIGNAR', gestion: '2026' };
+      db.query(`
+        SELECT n.materia_id, m.nombre AS materia, e.ciclo,
+               e.codigo, e.nombre AS estudiante,
+               n.parcial_1, n.parcial_final, n.trabajos, n.nota_final
+        FROM notas n
+        JOIN estudiantes e ON n.estudiante_id = e.id
+        JOIN materias m ON n.materia_id = m.id
+        ORDER BY n.materia_id, e.nombre`, (err2, notas) => {
+        if (err2) return res.status(500).json(err2);
+        if (notas.length === 0) return res.status(400).json({ message: "No hay notas; registra notas antes de generar la demo" });
+
+        const grupos = {};
+        notas.forEach(n => {
+          if (!grupos[n.materia_id]) grupos[n.materia_id] = { materia_id: n.materia_id, materia: n.materia, ciclo: n.ciclo, filas: [] };
+          grupos[n.materia_id].filas.push(n);
+        });
+        const actas = Object.values(grupos).map(g => ({
+          materia_id: g.materia_id,
+          ciclo: g.ciclo,
+          acta: {
+            materia: g.materia,
+            ciclo: g.ciclo,
+            gestion: cfg.gestion || '2026',
+            comandante: cfg.comandante_nombre || 'POR ASIGNAR',
+            sello_tiempo: new Date().toISOString(),
+            registros: g.filas.map(registroDeNota)
+          }
+        }));
+        sellarActasSecuencial(actas, res);
+      });
+    });
   });
 });
 

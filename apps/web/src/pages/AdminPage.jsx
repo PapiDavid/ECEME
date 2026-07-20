@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
-import { ShieldAlert, Users, BookOpen, Settings, FileDown, RefreshCw, Plus, Trash2, Edit3, Save, X, GraduationCap, BookMarked, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ShieldAlert, Users, BookOpen, Settings, FileDown, RefreshCw, Plus, Trash2, Edit3, Save, X, GraduationCap, BookMarked, Search, ChevronLeft, ChevronRight, KeyRound } from 'lucide-react';
 import Header from '@/components/Header.jsx';
 import Footer from '@/components/Footer.jsx';
 import api from '@/lib/api'; 
@@ -77,13 +77,14 @@ const AdminPage = () => {
   useEffect(() => { fetchData(); }, []);
 
   const handlePublishNotes = async () => {
-    if (!window.confirm('¿PUBLICAR CALIFICACIONES EN EL TABLERO OFICIAL?')) return;
+    if (!window.confirm('¿PUBLICAR CALIFICACIONES EN EL TABLERO OFICIAL?\n\nEL ACTA QUEDARÁ SELLADA COMO UN BLOQUE INMUTABLE EN LA CADENA (BLOCKCHAIN).')) return;
     try {
-      await api.post('/notas/publicar-lote');
-      toast.success('CALIFICACIONES PUBLICADAS CON ÉXITO');
+      // Publica el acta y la sella como bloque encadenado (SHA-256) — core del proyecto
+      const { data } = await api.post('/actas/publicar', {});
+      toast.success(`ACTA PUBLICADA Y SELLADA EN LA CADENA (BLOQUE #${data.indice})`);
       fetchData();
     } catch (err) {
-      toast.error('ERROR AL PUBLICAR');
+      toast.error(err.response?.data?.message?.toUpperCase?.() || 'ERROR AL PUBLICAR');
     }
   };
 
@@ -117,6 +118,18 @@ const AdminPage = () => {
       fetchData();
     } catch (err) {
       toast.error('ERROR AL ELIMINAR');
+    }
+  };
+
+  // Recuperación de credenciales: restablece la clave del usuario a la genérica
+  // institucional y lo obliga a cambiarla en su próximo ingreso (primer_login = 1).
+  const handleResetPassword = async (user) => {
+    if (!window.confirm(`¿RESTABLECER LA CONTRASEÑA DE ${user.grado || ''} ${user.nombre}?\n\nSE ASIGNARÁ LA CLAVE INSTITUCIONAL Y DEBERÁ CAMBIARLA EN SU PRÓXIMO INGRESO.`)) return;
+    try {
+      const { data } = await api.post(`/admin/usuarios/${user.usuario_id}/reset-password`);
+      toast.success(`CLAVE TEMPORAL DE ${user.codigo}: ${data.password_temporal}`, { duration: 10000 });
+    } catch (err) {
+      toast.error('ERROR AL RESTABLECER LA CONTRASEÑA');
     }
   };
 
@@ -453,6 +466,7 @@ const AdminPage = () => {
                           ) : (
                             <div className="flex justify-center space-x-4">
                               <button onClick={() => handleEditClick(user, user.type)} className="text-primary hover:scale-125 transition-transform"><Edit3 size={18}/></button>
+                              <button onClick={() => handleResetPassword(user)} title="RESTABLECER CONTRASEÑA" className="text-amber-600 hover:scale-125 transition-transform"><KeyRound size={18}/></button>
                               <button onClick={() => handleDeleteUser(user.id, user.type)} className="text-destructive hover:scale-125 transition-transform"><Trash2 size={18}/></button>
                             </div>
                           )}

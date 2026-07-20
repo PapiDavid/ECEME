@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ECEME · Cadena de Actas (Blockchain)</title>
+<style>
+  :root {
+    --verde: #16a34a; --verde-bg: #052e16;
+    --rojo: #dc2626;  --rojo-bg: #450a0a;
+    --azul: #2563eb;  --borde: #1e293b;
+    --panel: #0f172a; --panel2: #1e293b; --txt: #e2e8f0; --txt2: #94a3b8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+    background: #020617; color: var(--txt); padding: 24px;
+  }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--txt2); font-size: 13px; margin-bottom: 20px; }
+  .barra { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; align-items: center; }
+  button {
+    background: var(--panel2); color: var(--txt); border: 1px solid var(--borde);
+    padding: 9px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
+    transition: .15s; font-weight: 600;
+  }
+  button:hover { border-color: var(--azul); }
+  button.primary { background: var(--azul); border-color: var(--azul); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #estado {
+    padding: 14px 18px; border-radius: 10px; font-weight: 700; font-size: 15px;
+    margin-bottom: 26px; border: 1px solid var(--borde);
+  }
+  #estado.ok  { background: var(--verde-bg); border-color: var(--verde); color: #86efac; }
+  #estado.bad { background: var(--rojo-bg);  border-color: var(--rojo);  color: #fca5a5; }
+  #estado.neutral { background: var(--panel); color: var(--txt2); }
+
+  .cadena { display: flex; flex-direction: column; align-items: stretch; max-width: 860px; margin: 0 auto; }
+
+  /* ---------- BLOQUE ---------- */
+  .bloque {
+    background: var(--panel); border: 2px solid var(--borde); border-radius: 14px;
+    padding: 16px 18px; position: relative;
+  }
+  .bloque.ok  { border-color: #14532d; box-shadow: 0 0 14px rgba(22,163,74,.10); }
+  .bloque.bad { border-color: var(--rojo); box-shadow: 0 0 0 3px rgba(220,38,38,.18), 0 0 18px rgba(220,38,38,.25); }
+  .bloque-cab { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .idx { font-size: 15px; font-weight: 800; }
+  .idx small { color: var(--txt2); font-weight: 500; }
+  .badge { font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 999px; letter-spacing: .3px; }
+  .badge.ok  { background: var(--verde); color: #022c16; }
+  .badge.bad { background: var(--rojo); color: #fff; }
+  .badge.genesis { background: #7c3aed; color: #fff; margin-right: 6px; }
+  .meta { color: var(--txt2); font-size: 12px; margin: 8px 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-bottom: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--borde); }
+  th { color: var(--txt2); font-weight: 600; }
+  td.nf { font-weight: 700; color: #fbbf24; }
+  td.pos { color: var(--txt2); }
+  .hashes { font-family: "Consolas", monospace; font-size: 11px; display: grid; gap: 4px; }
+  .hashes div { overflow-wrap: anywhere; }
+  .hashes .lbl { color: var(--txt2); }
+  .h-ok { color: #86efac; } .h-bad { color: #fca5a5; }
+
+  /* ---------- CADENITA (eslabones entre bloques) ---------- */
+  .conector { display: flex; flex-direction: column; align-items: center; padding: 6px 0; }
+  .eslabon {
+    width: 18px; height: 30px; border: 5px solid var(--verde);
+    border-radius: 12px; background: transparent;
+  }
+  .eslabon.lado { width: 10px; height: 22px; border-width: 4px; border-radius: 8px; opacity: .9; }
+  .eslabon + .eslabon { margin-top: -12px; }
+  .conector.bad .eslabon { border-color: var(--rojo); }
+  .rotura {
+    color: var(--rojo); font-weight: 800; font-size: 13px; letter-spacing: 1px;
+    padding: 4px 10px; border: 1px dashed var(--rojo); border-radius: 8px; margin: 6px 0;
+    background: var(--rojo-bg);
+  }
+  .vacio { color: var(--txt2); padding: 40px; text-align: center; border: 1px dashed var(--borde); border-radius: 12px; }
+
+  /* ---------- LEYENDA / DEMO SQL ---------- */
+  .leyenda {
+    font-size: 12px; color: var(--txt2); margin-top: 30px; line-height: 1.7;
+    border-top: 1px solid var(--borde); padding-top: 16px; max-width: 860px; margin-left: auto; margin-right: auto;
+  }
+  .leyenda h3 { color: var(--txt); font-size: 13px; margin: 14px 0 6px; }
+  pre {
+    background: var(--panel); border: 1px solid var(--borde); border-radius: 8px;
+    padding: 10px 12px; overflow-x: auto; color: #93c5fd; font-size: 12px; margin: 6px 0;
+  }
+  code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <h1>🔗 Cadena de Actas — ECEME</h1>
+  <div class="sub">Sistema Web con Tecnología Blockchain · cada acta publicada queda sellada con SHA-256 e inmutable.</div>
+
+  <div class="barra">
+    <button class="primary" onclick="verificar()">🔎 Verificar cadena</button>
+    <button onclick="demoReset()">♻️ Reconstruir cadena desde las notas</button>
+    <span id="cargando" style="color:var(--txt2);font-size:12px;"></span>
+  </div>
+
+  <div id="estado" class="neutral">Pulsa «Verificar cadena» para comprobar la integridad.</div>
+  <div id="cadena" class="cadena"></div>
+
+  <div class="leyenda">
+    <h3>📦 ¿Cómo se crean bloques reales?</h3>
+    Cuando el docente guarda notas y el administrador pulsa <b>«Publicar Tablero»</b> en su panel,
+    el acta del momento se sella como un <b>bloque nuevo</b> encadenado al anterior. Cada publicación = un bloque más.
+    Recarga esta página después de publicar y lo verás aparecer.
+
+    <h3>🕵️ Demostración de inmutabilidad (manipulación manual en MySQL)</h3>
+    <b>1)</b> Ver las notas selladas dentro de los bloques, como una tabla normal:
+    <pre>SELECT * FROM v_actas_notas;</pre>
+    <b>2)</b> Elegir un cursante de esa lista y alterar su nota (usa su <code>bloque</code> y su <code>pos</code>).
+    Ejemplo: subir el <b>examen final</b> del registro <code>pos=0</code> del <code>bloque=0</code> a 95:
+    <pre>UPDATE bloques
+SET acta_json = JSON_REPLACE(acta_json, '$.registros[0].parcial_final', '95.00')
+WHERE indice = 0;</pre>
+    Campos que puedes alterar: <code>parcial_1</code> (parcial), <code>parcial_final</code> (examen final),
+    <code>trabajos</code> (práctica), <code>nota_final</code>.<br>
+    <b>3)</b> Pulsar «Verificar cadena»: el bloque alterado sale <span class="h-bad">ALTERADO</span>
+    (sus datos ya no coinciden con su hash).<br>
+    <b>4)</b> Si el atacante intenta ocultarlo cambiando también el hash:
+    <pre>UPDATE bloques SET hash = SHA2(CONCAT(acta_json, 'x'), 256) WHERE indice = 0;</pre>
+    …la cadenita hacia el bloque siguiente se <span class="h-bad">ROMPE</span> (su «hash previo» ya no coincide):
+    tendría que rehacer TODA la cadena sin conocer la fórmula del sistema.<br>
+    <b>5)</b> «Reconstruir cadena desde las notas» vuelve a sellar todo (regresa a verde).
+  </div>
+
+<script>
+const API = ''; // mismo origen (servido por Express en :3001)
+const $ = (id) => document.getElementById(id);
+const corto = (h) => h ? h.slice(0, 20) + '…' + h.slice(-8) : '—';
+
+function cargando(txt) { $('cargando').textContent = txt || ''; }
+
+async function verificar() {
+  cargando('Verificando…');
+  try {
+    const r = await fetch(API + '/api/blockchain/verificar');
+    const data = await r.json();
+    pintarEstado(data);
+    pintarCadena(data.bloques);
+  } catch (e) {
+    $('estado').className = 'bad';
+    $('estado').textContent = '⚠️ No se pudo conectar con el servidor (¿está corriendo en el puerto 3001?)';
+  }
+  cargando('');
+}
+
+function pintarEstado(data) {
+  const est = $('estado');
+  if (data.longitud === 0) {
+    est.className = 'neutral';
+    est.textContent = 'La cadena está vacía. Publica un acta desde el panel admin o pulsa «Reconstruir cadena».';
+  } else if (data.valida) {
+    est.className = 'ok';
+    est.textContent = `✅ CADENA ÍNTEGRA — ${data.longitud} bloque(s) verificado(s). Ninguna acta fue alterada.`;
+  } else {
+    const e = data.primer_error;
+    const motivo = e.motivo === 'DATOS_ALTERADOS'
+      ? 'los datos no coinciden con su hash (fueron alterados)'
+      : 'su hash previo no enlaza con el bloque anterior';
+    est.className = 'bad';
+    est.textContent = `❌ CADENA ROTA — el bloque #${e.indice} falló: ${motivo}.`;
+  }
+}
+
+// Dibuja la cadenita de eslabones entre un bloque y el siguiente.
+function conectorHTML(enlaceIntacto) {
+  if (enlaceIntacto) {
+    return `<div class="conector">
+      <div class="eslabon"></div>
+      <div class="eslabon lado"></div>
+      <div class="eslabon"></div>
+    </div>`;
+  }
+  return `<div class="conector bad">
+    <div class="eslabon"></div>
+    <div class="rotura">⛓️‍💥 CADENA ROTA</div>
+    <div class="eslabon"></div>
+  </div>`;
+}
+
+function pintarCadena(bloques) {
+  const cont = $('cadena');
+  if (!bloques || bloques.length === 0) {
+    cont.innerHTML = '<div class="vacio">No hay bloques todavía.</div>';
+    return;
+  }
+  cont.innerHTML = bloques.map((b, i) => {
+    const conector = i === 0 ? '' : conectorHTML(b.enlace_intacto);
+    const filas = (b.acta.registros || []).map((reg, pos) => `
+      <tr>
+        <td class="pos">${pos}</td>
+        <td>${reg.codigo || ''}</td>
+        <td>${reg.estudiante || ''}</td>
+        <td>${reg.parcial_1}</td>
+        <td>${reg.parcial_final}</td>
+        <td>${reg.trabajos}</td>
+        <td class="nf">${reg.nota_final}</td>
+      </tr>`).join('');
+    const badge = b.valido
+      ? '<span class="badge ok">✔ VÁLIDO</span>'
+      : `<span class="badge bad">✗ ${b.hash_intacto ? 'ENLACE ROTO' : 'ALTERADO'}</span>`;
+    const genesis = b.indice === 0 ? '<span class="badge genesis">GÉNESIS</span>' : '';
+    return `
+      ${conector}
+      <div class="bloque ${b.valido ? 'ok' : 'bad'}">
+        <div class="bloque-cab">
+          <div class="idx">📦 Bloque #${b.indice} <small>· ${b.acta.materia || ''} ${b.ciclo ? '· ' + b.ciclo : ''}</small></div>
+          <div>${genesis}${badge}</div>
+        </div>
+        <div class="meta">Gestión ${b.acta.gestion || '—'} · Comandante: ${b.acta.comandante || '—'} · ${b.creado_en ? new Date(b.creado_en).toLocaleString() : ''}</div>
+        <table>
+          <thead><tr><th>pos</th><th>Código</th><th>Cursante</th><th>Parcial</th><th>Ex. Final</th><th>Trab.</th><th>Nota</th></tr></thead>
+          <tbody>${filas || '<tr><td colspan="7" style="color:var(--txt2)">Sin registros</td></tr>'}</tbody>
+        </table>
+        <div class="hashes">
+          <div><span class="lbl">hash previo:</span> ${corto(b.hash_previo)}</div>
+          <div><span class="lbl">hash del bloque:</span> <span class="${b.hash_intacto ? 'h-ok' : 'h-bad'}">${corto(b.hash)}</span></div>
+          ${b.hash_intacto ? '' : `<div><span class="lbl">hash real (recalculado):</span> <span class="h-ok">${corto(b.hash_recalculado)}</span></div>`}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function accion(url, txtCargando) {
+  cargando(txtCargando);
+  try {
+    const r = await fetch(API + url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const data = await r.json();
+    if (!r.ok) alert(data.message || 'Error');
+  } catch (e) { alert('No se pudo conectar con el servidor.'); }
+  await verificar();
+}
+
+const demoReset = () => accion('/api/blockchain/demo-reset', 'Reconstruyendo…');
+
+verificar(); // al abrir la página
+</script>
+</body>
+</html>

@@ -173,6 +173,30 @@ CREATE TABLE bloques (
   creado_en   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
+-- Vista de auditoría: muestra las notas selladas dentro de cada bloque como
+-- una tabla normal (para la demostración de inmutabilidad).
+--   SELECT * FROM v_actas_notas;
+-- 'pos' es la posición del registro dentro del bloque (0, 1, 2, ...) y sirve
+-- para el UPDATE de la demo: JSON_REPLACE(acta_json, '$.registros[pos].campo', ...)
+CREATE OR REPLACE VIEW v_actas_notas AS
+SELECT b.indice AS bloque,
+       r.registro - 1 AS pos,
+       JSON_UNQUOTE(JSON_EXTRACT(b.acta_json, '$.materia')) AS materia,
+       r.codigo, r.estudiante,
+       r.parcial_1 AS parcial,
+       r.parcial_final AS examen_final,
+       r.trabajos,
+       r.nota_final
+FROM bloques b,
+     JSON_TABLE(b.acta_json, '$.registros[*]'
+       COLUMNS (registro FOR ORDINALITY,
+                codigo        VARCHAR(20)  PATH '$.codigo',
+                estudiante    VARCHAR(150) PATH '$.estudiante',
+                parcial_1     VARCHAR(10)  PATH '$.parcial_1',
+                parcial_final VARCHAR(10)  PATH '$.parcial_final',
+                trabajos      VARCHAR(10)  PATH '$.trabajos',
+                nota_final    VARCHAR(10)  PATH '$.nota_final')) r;
+
 -- ============================================================
 --  DATOS DE PRUEBA (contraseñas en texto plano por ahora)
 -- ============================================================
