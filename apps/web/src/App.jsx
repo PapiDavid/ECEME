@@ -11,6 +11,7 @@ import ChangePasswordPage from './pages/ChangePasswordPage.jsx';
 import EstudiantePage from './pages/EstudiantePage.jsx';
 import DocentePage from './pages/DocentePage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
+import AuditoriaPage from './pages/AuditoriaPage.jsx';
 import NotesPage from './pages/NotesPage.jsx'; // Asegúrate de tener esta importada
 
 function App() {
@@ -65,6 +66,16 @@ function App() {
                 <AdminPage />
               </ProtectedRoute>
             } 
+          />
+
+          {/* 3b. AUDITORÍA (solo admin): logs de actividad de usuarios */}
+          <Route
+            path="/admin/auditoria"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AuditoriaPage />
+              </ProtectedRoute>
+            }
           />
 
           {/* 4. BITÁCORA */}

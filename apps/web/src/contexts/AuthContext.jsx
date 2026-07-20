@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 // 1. Importamos nuestra configuración de Axios para MySQL
-import api from '@/lib/api';
+import api, { setAuditHeaders } from '@/lib/api';
 
 const AuthContext = createContext(null);
 
@@ -22,9 +22,12 @@ export const AuthProvider = ({ children }) => {
     const savedToken = localStorage.getItem('eceme_token');
 
     if (savedUser && savedToken) {
-      setCurrentUser(JSON.parse(savedUser));
+      const parsedUser = JSON.parse(savedUser);
+      setCurrentUser(parsedUser);
       // Configuramos el token para futuras peticiones a la API
       api.defaults.headers.common['Authorization'] = `Bearer ${savedToken}`;
+      // Cabeceras de identidad para la auditoría (quién hace cada acción)
+      setAuditHeaders(parsedUser);
     }
     setInitialLoading(false);
   }, []);
@@ -47,6 +50,8 @@ export const AuthProvider = ({ children }) => {
 
       // Seteamos el token para las cabeceras de Axios
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      // Cabeceras de identidad para la auditoría (quién hace cada acción)
+      setAuditHeaders(user);
 
       return response.data;
     } catch (err) {
@@ -61,6 +66,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('eceme_user');
     localStorage.removeItem('eceme_token');
     delete api.defaults.headers.common['Authorization'];
+    setAuditHeaders(null);
     setCurrentUser(null);
   };
 

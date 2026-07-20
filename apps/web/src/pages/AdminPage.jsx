@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ShieldAlert, Users, BookOpen, Settings, FileDown, RefreshCw, Plus, Trash2, Edit3, Save, X, GraduationCap, BookMarked, Search, ChevronLeft, ChevronRight, KeyRound } from 'lucide-react';
+import { ShieldAlert, Users, BookOpen, Settings, FileDown, RefreshCw, Plus, Trash2, Edit3, Save, X, GraduationCap, BookMarked, Search, ChevronLeft, ChevronRight, KeyRound, ScrollText } from 'lucide-react';
 import Header from '@/components/Header.jsx';
 import Footer from '@/components/Footer.jsx';
 import api from '@/lib/api'; 
@@ -14,6 +15,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
 const AdminPage = () => {
+  const navigate = useNavigate();
   const [materias, setMaterias] = useState([]);
   const [criterios, setCriterios] = useState([]);
   const [config, setConfig] = useState(null);
@@ -36,6 +38,8 @@ const AdminPage = () => {
   const [materiaName, setMateriaName] = useState('');
   const [materiaCiclo, setMateriaCiclo] = useState('PRIMER CICLO');
   const [comandanteName, setComandanteName] = useState('');
+  // Materia elegida para descargar su acta oficial en PDF
+  const [actaMateriaId, setActaMateriaId] = useState('');
 
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
@@ -45,6 +49,7 @@ const AdminPage = () => {
   const [dirSearch, setDirSearch] = useState('');
   const [dirPage, setDirPage] = useState(1);
   const PAGE_SIZE = 10;
+
 
   const fetchData = async () => {
     setLoading(true);
@@ -209,11 +214,222 @@ const AdminPage = () => {
   const changeDirTab = (tab) => { setDirTab(tab); setDirPage(1); };
   const changeDirSearch = (v) => { setDirSearch(v); setDirPage(1); };
 
-  const generateNominalPDF = () => {
-    const doc = new jsPDF();
-    doc.setFont("helvetica", "bold");
-    doc.text("ESCUELA DE COMANDO Y ESTADO MAYOR DEL EJÉRCITO", 105, 20, { align: "center" });
-    doc.save("Resolucion_Nominal_ECEME.pdf");
+  // ============================================================
+  //  MÓDULO DE REPORTES — actas oficiales listas para imprimir (jsPDF)
+  // ============================================================
+
+  // Umbrales de la clasificación del desempeño docente (fáciles de ajustar)
+  const UMBRAL_EXCELENTE = 90;   // promedio >= 90  → EXCELENTE
+  const UMBRAL_MUY_BUENO = 75;   // promedio >= 75  → MUY BUENO
+  //                                promedio <  75  → REGULAR
+
+  // Encabezado institucional centrado (va en TODOS los reportes).
+  // Devuelve la coordenada Y donde puede empezar el contenido.
+  const encabezadoInstitucional = (doc) => {
+    const cx = doc.internal.pageSize.getWidth() / 2;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text('COMANDO DE INSTITUTOS MILITARES', cx, 18, { align: 'center' });
+    doc.text('ESCUELA DE COMANDO Y ESTADO MAYOR DEL EJÉRCITO', cx, 24, { align: 'center' });
+    doc.text('"MCAL. ANDRÉS DE SANTA CRUZ"', cx, 30, { align: 'center' });
+    doc.text('BOLIVIA', cx, 36, { align: 'center' });
+    return 48;
+  };
+
+  // Bloque de firma centrado (va al pie de TODOS los reportes).
+  // Si no queda espacio en la página, salta a una nueva.
+  const bloqueFirma = (doc, y, comandante) => {
+    const cx = doc.internal.pageSize.getWidth() / 2;
+    const alto = doc.internal.pageSize.getHeight();
+    if (y + 40 > alto - 15) { doc.addPage(); y = 30; }
+    y += 30;
+    doc.setLineWidth(0.3);
+    doc.line(cx - 40, y, cx + 40, y); // línea para la firma
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text((comandante || 'POR ASIGNAR').toUpperCase(), cx, y + 6, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.text('COMANDANTE DE LA ECEME.', cx, y + 12, { align: 'center' });
+  };
+
+  const nota2 = (v) => Number(v).toFixed(2);
+
+  // --- Reporte 1: ACTA OFICIAL DE CALIFICACIONES (materia elegida) ---
+  const descargarActaOficial = async () => {
+    if (!actaMateriaId) return toast.error('SELECCIONE UNA MATERIA PARA EL ACTA');
+    try {
+      const { data } = await api.get(`/reportes/acta/${actaMateriaId}`);
+      const doc = new jsPDF({ format: 'letter' });
+      const cx = doc.internal.pageSize.getWidth() / 2;
+      let y = encabezadoInstitucional(doc);
+
+      doc.setFontSize(13);
+      doc.setFont('helvetica', 'bold');
+      doc.text('ACTA OFICIAL DE CALIFICACIONES', cx, y, { align: 'center' });
+      y += 7;
+      doc.setFontSize(10);
+      doc.text(`MATERIA: ${data.materia}  ·  ${data.ciclo || ''}  ·  GESTIÓN ${data.gestion}`, cx, y, { align: 'center' });
+      y += 6;
+
+      doc.autoTable({
+        startY: y,
+        head: [['N°', 'CÓDIGO', 'CURSANTE', 'GRADO', '1ER PARCIAL\n30%', 'EXAMEN FINAL\n60%', 'TRABAJOS\n10%', 'NOTA\nFINAL']],
+        // Orden de mérito: el backend ya manda la lista de mayor a menor
+        body: data.registros.map((r, i) => [
+          i + 1, r.codigo, r.nombre, r.grado || '—',
+          nota2(r.parcial_1), nota2(r.parcial_final), nota2(r.trabajos), nota2(r.nota_final)
+        ]),
+        theme: 'grid',
+        styles: { font: 'helvetica', fontSize: 8, halign: 'center', cellPadding: 1.5 },
+        headStyles: { fillColor: [31, 41, 55], textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
+        columnStyles: { 2: { halign: 'left' } },
+        margin: { left: 15, right: 15 }
+      });
+      y = doc.lastAutoTable.finalY + 8;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.text(`Fecha de emisión: ${new Date().toLocaleDateString('es-BO', { day: '2-digit', month: 'long', year: 'numeric' })}`, 15, y);
+      y += 6;
+      // Si el acta ya fue sellada como bloque en la cadena, se deja constancia
+      if (data.sello) {
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.text(`Documento sellado en la cadena, bloque N° ${data.sello.bloque}, hash: ${data.sello.hash}`, 15, y, { maxWidth: 185 });
+        y += 8;
+      }
+
+      bloqueFirma(doc, y, data.comandante);
+      doc.save(`Acta_Oficial_${data.materia.replaceAll(' ', '_')}.pdf`);
+      toast.success('ACTA OFICIAL GENERADA');
+    } catch (err) {
+      toast.error(err.response?.data?.message?.toUpperCase?.() || 'ERROR AL GENERAR EL ACTA');
+    }
+  };
+
+  // --- Reporte 2: DESEMPEÑO DEL PERSONAL DE DOCENTES ---
+  const descargarDesempenoDocente = async () => {
+    try {
+      const { data } = await api.get('/reportes/desempeno-docente');
+      if (!data.docentes || data.docentes.length === 0) return toast.error('AÚN NO HAY EVALUACIONES DOCENTES REGISTRADAS');
+
+      const doc = new jsPDF({ format: 'letter' });
+      const cx = doc.internal.pageSize.getWidth() / 2;
+      let y = encabezadoInstitucional(doc);
+
+      doc.setFontSize(13);
+      doc.setFont('helvetica', 'bold');
+      doc.text('DESEMPEÑO DEL PERSONAL DE DOCENTES DE LA ECEME.', cx, y, { align: 'center' });
+      y += 6;
+      doc.setFontSize(10);
+      doc.text(`GESTIÓN ${data.gestion}`, cx, y, { align: 'center' });
+      y += 8;
+
+      // Salta de página si no queda espacio para el siguiente bloque
+      const asegurarEspacio = (necesario) => {
+        if (y + necesario > doc.internal.pageSize.getHeight() - 20) { doc.addPage(); y = 25; }
+      };
+
+      // ---------- I. Desempeño específico por materias ----------
+      doc.setFontSize(11);
+      doc.text('I. DESEMPEÑO ESPECÍFICO POR MATERIAS', 15, y);
+      y += 4;
+      // Cuadro con la lista de criterios reales del sistema y su descripción
+      doc.autoTable({
+        startY: y,
+        head: [['N°', 'CRITERIO DE EVALUACIÓN']],
+        body: data.criterios.map((c, i) => [`C${i + 1}`, c.pregunta]),
+        theme: 'grid',
+        styles: { font: 'helvetica', fontSize: 8, cellPadding: 1.5 },
+        headStyles: { fillColor: [31, 41, 55], textColor: 255, fontStyle: 'bold' },
+        columnStyles: { 0: { halign: 'center', cellWidth: 14 } },
+        margin: { left: 15, right: 15 }
+      });
+      y = doc.lastAutoTable.finalY + 6;
+
+      // Por cada docente: tabla con sus materias, la nota de cada criterio y el TOTAL
+      const encabezadoCriterios = ['MATERIA', ...data.criterios.map((c, i) => `C${i + 1}`), 'TOTAL'];
+      data.docentes.forEach(d => {
+        asegurarEspacio(30);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text(`${d.grado || ''} ${d.docente}`.trim().toUpperCase(), 15, y);
+        y += 2;
+        doc.autoTable({
+          startY: y,
+          head: [encabezadoCriterios],
+          body: d.materias.map(m => [
+            m.materia,
+            ...data.criterios.map(c => m.notas[c.id] != null ? nota2(m.notas[c.id]) : '—'),
+            nota2(m.total)
+          ]),
+          theme: 'grid',
+          styles: { font: 'helvetica', fontSize: 8, halign: 'center', cellPadding: 1.5 },
+          headStyles: { fillColor: [55, 65, 81], textColor: 255, fontStyle: 'bold' },
+          columnStyles: { 0: { halign: 'left' } },
+          margin: { left: 15, right: 15 }
+        });
+        y = doc.lastAutoTable.finalY + 6;
+      });
+
+      // ---------- II. Desempeño de los docentes en general ----------
+      asegurarEspacio(40);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('II. DESEMPEÑO DE LOS DOCENTES EN GENERAL', 15, y);
+      y += 4;
+      const cuerpoGeneral = [];
+      data.docentes.forEach(d => {
+        d.materias.forEach((m, i) => {
+          cuerpoGeneral.push([i === 0 ? `${d.grado || ''} ${d.docente}`.trim() : '', m.materia, nota2(m.total)]);
+        });
+        cuerpoGeneral.push([{ content: 'PROMEDIO GENERAL', colSpan: 2, styles: { fontStyle: 'bold', halign: 'right' } },
+                            { content: nota2(d.promedio_general), styles: { fontStyle: 'bold' } }]);
+      });
+      doc.autoTable({
+        startY: y,
+        head: [['DOCENTE', 'MATERIA', 'NOTA /100']],
+        body: cuerpoGeneral,
+        theme: 'grid',
+        styles: { font: 'helvetica', fontSize: 8, cellPadding: 1.5 },
+        headStyles: { fillColor: [31, 41, 55], textColor: 255, fontStyle: 'bold' },
+        columnStyles: { 2: { halign: 'center' } },
+        margin: { left: 15, right: 15 }
+      });
+      y = doc.lastAutoTable.finalY + 8;
+
+      // ---------- III. Desempeño general (clasificación) ----------
+      const clasificar = (p) => p >= UMBRAL_EXCELENTE ? 'EXCELENTE' : p >= UMBRAL_MUY_BUENO ? 'MUY BUENO' : 'REGULAR';
+      const conteo = { 'EXCELENTE': 0, 'MUY BUENO': 0, 'REGULAR': 0 };
+      data.docentes.forEach(d => { conteo[clasificar(d.promedio_general)]++; });
+
+      asegurarEspacio(50);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('III. DESEMPEÑO GENERAL', 15, y);
+      y += 4;
+      doc.autoTable({
+        startY: y,
+        head: [['DOCENTE', 'PROMEDIO /100', 'CLASIFICACIÓN']],
+        body: [
+          ...data.docentes.map(d => [`${d.grado || ''} ${d.docente}`.trim(), nota2(d.promedio_general), clasificar(d.promedio_general)]),
+          [{ content: `RESUMEN: EXCELENTE (>= ${UMBRAL_EXCELENTE}): ${conteo['EXCELENTE']}  ·  MUY BUENO (>= ${UMBRAL_MUY_BUENO}): ${conteo['MUY BUENO']}  ·  REGULAR: ${conteo['REGULAR']}`,
+             colSpan: 3, styles: { fontStyle: 'bold', halign: 'center', fillColor: [243, 244, 246] } }]
+        ],
+        theme: 'grid',
+        styles: { font: 'helvetica', fontSize: 8, cellPadding: 1.5 },
+        headStyles: { fillColor: [31, 41, 55], textColor: 255, fontStyle: 'bold' },
+        columnStyles: { 1: { halign: 'center' }, 2: { halign: 'center' } },
+        margin: { left: 15, right: 15 }
+      });
+      y = doc.lastAutoTable.finalY + 4;
+
+      bloqueFirma(doc, y, data.comandante);
+      doc.save('Desempeno_Docentes_ECEME.pdf');
+      toast.success('REPORTE DE DESEMPEÑO GENERADO');
+    } catch (err) {
+      toast.error(err.response?.data?.message?.toUpperCase?.() || 'ERROR AL GENERAR EL REPORTE');
+    }
   };
 
   return (
@@ -508,12 +724,30 @@ const AdminPage = () => {
                    <h2 className="font-black uppercase tracking-tighter flex items-center text-xl"><BookOpen className="mr-3 text-primary"/> Consolidado Académico</h2>
                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Control centralizado de calificaciones MySQL</p>
                  </div>
-                 <div className="flex gap-3">
+                 <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
                    <Button onClick={handlePublishNotes} className="bg-destructive text-destructive-foreground font-black text-xs uppercase h-11 px-8 rounded-none border-b-4 border-black/20">
                      <RefreshCw size={16} className="mr-2" /> Publicar Tablero
                    </Button>
-                   <Button onClick={generateNominalPDF} variant="outline" className="border-2 border-primary font-bold text-xs uppercase h-11 rounded-none shadow-sm">
-                     <FileDown size={16} className="mr-2" /> Descargar PDF
+                   {/* Módulo de reportes: acta oficial (por materia) y desempeño docente */}
+                   <div className="flex gap-2 items-center">
+                     <Select value={actaMateriaId} onValueChange={setActaMateriaId}>
+                       <SelectTrigger className="h-11 w-56 font-bold text-[10px] uppercase border-2 border-primary rounded-none">
+                         <SelectValue placeholder="MATERIA DEL ACTA..." />
+                       </SelectTrigger>
+                       <SelectContent>
+                         {materias.map(m => (
+                           <SelectItem key={m.id} value={String(m.id)}>
+                             {m.nombre} · {m.ciclo === 'PRIMER CICLO' ? '1ER' : '2DO'}
+                           </SelectItem>
+                         ))}
+                       </SelectContent>
+                     </Select>
+                     <Button onClick={descargarActaOficial} variant="outline" className="border-2 border-primary font-bold text-xs uppercase h-11 rounded-none shadow-sm">
+                       <FileDown size={16} className="mr-2" /> Descargar acta oficial
+                     </Button>
+                   </div>
+                   <Button onClick={descargarDesempenoDocente} variant="outline" className="border-2 border-accent font-bold text-xs uppercase h-11 rounded-none shadow-sm">
+                     <FileDown size={16} className="mr-2" /> Reporte de desempeño docente
                    </Button>
                  </div>
                </div>
@@ -547,6 +781,15 @@ const AdminPage = () => {
                     </tbody>
                   </table>
                </div>
+            </div>
+
+            {/* Acceso a la página de Auditoría (logs de actividad de usuarios) */}
+            <div className="flex justify-center pt-2">
+              <Button
+                onClick={() => navigate('/admin/auditoria')}
+                className="bg-primary text-primary-foreground font-black text-xs uppercase h-12 px-10 rounded-none border-b-4 border-black/20 shadow-lg">
+                <ScrollText size={18} className="mr-3" /> Auditoría
+              </Button>
             </div>
           </div>
         )}

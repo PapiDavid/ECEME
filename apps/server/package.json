@@ -8,6 +8,7 @@
     "start": "node index.js",
     "db:setup": "mysql -u root -p < schema.sql",
     "hash:pwd": "node hashear-passwords.js",
+    "sellar:log": "node sellar-auditoria.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

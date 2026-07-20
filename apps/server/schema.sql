@@ -197,6 +197,27 @@ FROM bloques b,
                 trabajos      VARCHAR(10)  PATH '$.trabajos',
                 nota_final    VARCHAR(10)  PATH '$.nota_final')) r;
 
+-- ------------------------------------------------------------
+-- AUDITORÍA (logs) — rastreo de actividad de los usuarios.
+-- usuario_id SIN clave foránea a propósito: el log debe sobrevivir
+-- aunque el usuario se elimine (por eso también se copia su nombre).
+-- En una BD ya existente NO reejecutar este schema (hace DROP de todo);
+-- usar apps/server/auditoria.sql, que solo crea esta tabla.
+-- ------------------------------------------------------------
+CREATE TABLE auditoria (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  usuario_id     INT NULL,
+  usuario_nombre VARCHAR(150) NOT NULL,
+  rol            VARCHAR(20) NULL,
+  accion         VARCHAR(40) NOT NULL,   -- código corto: INICIO_SESION, PUBLICAR_ACTA, CREAR_CURSANTE...
+  detalle        VARCHAR(500) NULL,      -- descripción legible del evento
+  ip             VARCHAR(45) NULL,       -- IPv4 o IPv6 del equipo cliente
+  dispositivo    VARCHAR(100) NULL,      -- navegador y sistema operativo, ej. "Chrome en Windows 10/11"
+  fecha          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  hash           VARCHAR(64) NULL,       -- SHA-256 del registro (datos + hash_previo)
+  hash_previo    VARCHAR(64) NULL        -- hash del registro anterior ("0" en el génesis)
+) ENGINE=InnoDB;
+
 -- ============================================================
 --  DATOS DE PRUEBA (contraseñas en texto plano por ahora)
 -- ============================================================

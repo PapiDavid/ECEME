@@ -91,7 +91,7 @@ afecta la integridad de la cadena de actas.
   y paginación de 10.
 
 ## Pendiente (lo importante que falta)
-1. **Botones de PDF** con jsPDF (acta para el comandante, ranking docente).
+(Nada crítico: bcrypt ✓, blockchain ✓, auditoría ✓, reportes PDF ✓.)
 
 ---
 
@@ -168,6 +168,108 @@ blockchain NO se tocó.
 - Probado end-to-end: migración idempotente ✓ · login admin con clave de
   siempre ✓ · registro nuevo queda hasheado (`$2b$10$…`) ✓ · reset →
   `primer_login = 1` y entra con ECEME2026 ✓ · cadena blockchain intacta ✓.
+
+---
+
+# Registro de avances — 2026-07-20 · MÓDULO DE AUDITORÍA (logs)
+
+Rastreo de actividad de usuarios. La blockchain NO se tocó.
+
+- **Tabla `auditoria`** (ya creada en la BD viva con `apps/server/auditoria.sql`;
+  la definición también está en `schema.sql` para instalaciones nuevas):
+  `usuario_id` (sin FK a propósito: el log sobrevive si el usuario se borra),
+  `usuario_nombre`, `rol`, `accion` (código corto), `detalle`, `ip`,
+  `dispositivo` ("Chrome en Windows 10/11"), `fecha`.
+  **OJO: nunca reejecutar schema.sql sobre la BD real** (hace DROP de todo);
+  para BD existente usar `mysql -u root -p eceme_db < auditoria.sql`.
+- **Backend** (`index.js`): middleware que arma `req.actor` desde cabeceras
+  `X-Usuario-Id/-Nombre/-Rol` + IP (x-forwarded-for → remoteAddress) + user
+  agent; `deducirDispositivo(ua)`; `registrarAuditoria(req, accion, detalle,
+  actorOverride)` — el INSERT del log jamás hace fallar la acción principal
+  (solo console.error). En el login se usa `actorOverride` (aún no hay cabeceras).
+- **Acciones auditadas**: INICIO_SESION, CAMBIO_PASSWORD, RESET_PASSWORD,
+  CREAR/EDITAR/ELIMINAR_CURSANTE, CREAR/EDITAR/ELIMINAR_DOCENTE,
+  CREAR/ELIMINAR_MATERIA, PUBLICAR_ACTA (con # de bloque), PUBLICAR_NOTAS,
+  CAMBIO_COMANDANTE, CREAR_CRITERIO.
+- **`GET /api/admin/auditoria`**: últimos 200, más reciente primero, filtro
+  `?q=` por usuario/acción/rol (parametrizado).
+- **Frontend**: `lib/api.js` exporta `setAuditHeaders(user)` (nombre con
+  encodeURIComponent porque las cabeceras no admiten acentos); AuthContext las
+  pone al login/restaurar sesión y las quita al logout. La auditoría es una
+  **PÁGINA propia**: `pages/AuditoriaPage.jsx` en la ruta `/admin/auditoria`
+  (protegida, solo admin) con tabla Fecha/Usuario/Rol/Acción/Detalle/IP/
+  Dispositivo, buscador con debounce (350 ms, filtra en el backend), botón
+  Refrescar y «Volver al panel». Se entra con el botón **«Auditoría»** al
+  final de `AdminPage.jsx` (decisión del usuario: página aparte, no sección).
+- Nota: la IP sale `::1` cuando se entra desde la misma máquina del servidor
+  (normal en pruebas locales). El navegador no puede leer el hostname del
+  equipo; lo estándar es IP + navegador + SO, que es lo implementado.
+- Probado end-to-end: login/publicar acta/crear cursante quedan registrados
+  con IP y dispositivo ✓ · filtro `?q=` ✓ · UTF-8 correcto ✓ · cadena intacta ✓.
+
+## Integridad de la bitácora por hashes (2026-07-20, mismo día)
+La auditoría también está **encadenada por SHA-256**, igual que las actas
+(pero es una cadena APARTE; blockchain.js no se tocó):
+- `apps/server/auditoria-hash.js` — fórmula compartida: SHA-256 de
+  usuario_id|usuario_nombre|rol|accion|detalle|ip|dispositivo|fecha ISO|hash_previo.
+  El id autoincremental NO entra al hash. Génesis: hash_previo = "0".
+  La fecha se fija en el código SIN milisegundos (TIMESTAMP no los conserva)
+  y se serializa siempre con toISOString.
+- `registrarAuditoria()` sella cada registro nuevo en caliente (busca el hash
+  del último y encadena). Si el sellado/INSERT falla, la acción principal
+  sigue normal (solo console.error).
+- Columnas `hash` y `hash_previo` en `auditoria` (ya aplicadas en la BD viva
+  con `apps/server/sellar-auditoria.sql`; también en auditoria.sql y schema.sql).
+- Migración `apps/server/sellar-auditoria.js` (`npm run sellar:log`):
+  re-encadena TODA la bitácora desde el génesis; determinista, se puede
+  repetir. **Ya corrida el 2026-07-20.** OJO: también "re-sella" datos
+  alterados, así que solo usarla para inicializar o restaurar a sabiendas.
+- `GET /api/admin/auditoria/verificar` → `{integra, longitud, primer_error:
+  {id, accion, motivo DATOS_ALTERADOS|ENLACE_ROTO}}`.
+- En `AuditoriaPage.jsx`: botón «Verificar integridad» con banner verde
+  «BITÁCORA ÍNTEGRA» o rojo «¡BITÁCORA ALTERADA!» (señala registro y motivo),
+  y columna Hash (10 primeros caracteres, hash completo en el tooltip).
+- Demo manual (igual que las actas): alterar en MySQL
+  `UPDATE auditoria SET detalle='...' WHERE id=N;` → verificar sale rojo.
+- Probado: íntegra ✓ · registro nuevo encadena en caliente ✓ · detalle
+  alterado → DATOS_ALTERADOS en ese registro ✓ · hash falsificado detectado ✓.
+
+---
+
+# Registro de avances — 2026-07-20 · MÓDULO DE REPORTES (PDF oficiales)
+
+Reemplaza el stub `generateNominalPDF`. PDFs tamaño carta con jsPDF +
+jspdf-autotable (ya estaban instalados en apps/web). Blockchain intacta.
+
+- **Todos los reportes** llevan el membrete institucional centrado (COMANDO DE
+  INSTITUTOS MILITARES / ESCUELA DE COMANDO... / "MCAL. ANDRÉS DE SANTA CRUZ" /
+  BOLIVIA) y cierran con el bloque de firma (línea + comandante de la tabla
+  `configuracion` + "COMANDANTE DE LA ECEME.").
+- **Backend** (solo datos; el PDF se arma en el frontend):
+  - `GET /api/reportes/acta/:materiaId` — lista nominal de la materia ordenada
+    de mayor a menor por nota_final (orden de mérito) + materia/ciclo/gestión/
+    comandante + `sello` {bloque, hash} si la materia ya está sellada en la
+    cadena (último bloque con ese materia_id; los de "Publicar Tablero" son
+    generales con materia_id NULL, así que el sello suele venir de demo-reset).
+  - `GET /api/reportes/desempeno-docente` — por docente y materia el promedio
+    de cada criterio REAL del sistema convertido a escala /100 (promedio 1–5
+    × 20), TOTAL por materia y promedio_general por docente.
+- **Frontend** (`AdminPage.jsx`, en el Consolidado Académico):
+  - Selector «MATERIA DEL ACTA...» + botón «Descargar acta oficial» →
+    "ACTA OFICIAL DE CALIFICACIONES": tabla N° de mérito/Código/Cursante/Grado/
+    1er Parcial 30%/Examen Final 60%/Trabajos 10%/Nota Final, fecha de emisión
+    y, si está sellada, la línea "Documento sellado en la cadena, bloque N° X,
+    hash: ...".
+  - Botón «Reporte de desempeño docente» → "DESEMPEÑO DEL PERSONAL DE DOCENTES
+    DE LA ECEME." en 3 partes: I. cuadro de criterios + tabla por docente
+    (materias × C1..Cn + TOTAL); II. materias con nota total y PROMEDIO GENERAL
+    por docente; III. clasificación EXCELENTE/MUY BUENO/REGULAR con conteo.
+    Umbrales como constantes: `UMBRAL_EXCELENTE = 90`, `UMBRAL_MUY_BUENO = 75`.
+  - OJO jsPDF: las fuentes estándar son latin-1; NO usar caracteres como ≥
+    (se escribió ">=" a propósito).
+- Probado: endpoints con datos reales ✓ (acta ordenada desc, sello bloque 0,
+  404 materia inexistente, promedios ×20 correctos) · generación PDF con
+  autotable validada en Node ✓ · build del frontend ✓.
 
 ---
 

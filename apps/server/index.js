@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const { GENESIS_PREV, calcularHash } = require('./blockchain');
+const { GENESIS_AUDITORIA, calcularHashAuditoria } = require('./auditoria-hash');
 require('dotenv').config();
 
 const app = express();
@@ -32,6 +33,130 @@ function usuarioSinPassword(u) {
   return resto;
 }
 
+// ============================================================
+//  AUDITORÍA (logs) — rastreo de actividad de los usuarios
+// ============================================================
+
+// Middleware: en cada petición deja en req.actor la identidad del usuario
+// (enviada por el frontend en cabeceras), la IP del cliente y el user agent.
+app.use((req, res, next) => {
+  const nombreHeader = req.headers['x-usuario-nombre'];
+  let nombre = null;
+  // El frontend manda el nombre codificado (las cabeceras no admiten acentos/ñ)
+  try { nombre = nombreHeader ? decodeURIComponent(nombreHeader) : null; } catch (e) { nombre = nombreHeader; }
+  req.actor = {
+    usuario_id: parseInt(req.headers['x-usuario-id']) || null,
+    nombre,
+    rol: req.headers['x-usuario-rol'] || null,
+    ip: (String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress || null,
+    userAgent: req.headers['user-agent'] || ''
+  };
+  next();
+});
+
+// Convierte el user agent en una etiqueta legible, ej. "Chrome en Windows 10/11".
+function deducirDispositivo(ua) {
+  ua = ua || '';
+  let navegador = 'Cliente desconocido';
+  if (/edg\//i.test(ua)) navegador = 'Edge';
+  else if (/opr\/|opera/i.test(ua)) navegador = 'Opera';
+  else if (/chrome\//i.test(ua)) navegador = 'Chrome';
+  else if (/firefox\//i.test(ua)) navegador = 'Firefox';
+  else if (/safari\//i.test(ua)) navegador = 'Safari';
+  else if (/curl|postman|insomnia/i.test(ua)) navegador = ua.split('/')[0];
+
+  let sistema = 'SO desconocido';
+  if (/windows nt 10/i.test(ua)) sistema = 'Windows 10/11';
+  else if (/windows/i.test(ua)) sistema = 'Windows';
+  else if (/android/i.test(ua)) sistema = 'Android';
+  else if (/iphone|ipad/i.test(ua)) sistema = 'iOS';
+  else if (/mac os x/i.test(ua)) sistema = 'macOS';
+  else if (/linux/i.test(ua)) sistema = 'Linux';
+  return `${navegador} en ${sistema}`;
+}
+
+// Inserta una fila en `auditoria` SELLADA con SHA-256: cada registro se
+// encadena al hash del anterior (mismo enfoque que la blockchain de actas).
+// El log NUNCA hace fallar la acción principal: si algo falla en el sellado
+// o el INSERT solo se deja constancia en consola.
+// `actorOverride` se usa en el login, donde las cabeceras aún no llegan.
+function registrarAuditoria(req, accion, detalle, actorOverride) {
+  const a = actorOverride || req.actor || {};
+  // Fecha explícita fijada en el código: se guarda Y se hashea la misma.
+  // Sin milisegundos porque TIMESTAMP de MySQL no los conserva (el hash debe
+  // poder recalcularse desde lo que quedó guardado).
+  const fecha = new Date();
+  fecha.setMilliseconds(0);
+
+  const reg = {
+    usuario_id: a.usuario_id || null,
+    usuario_nombre: a.nombre || 'DESCONOCIDO',
+    rol: a.rol || null,
+    accion,
+    detalle: detalle || null,
+    ip: (req.actor && req.actor.ip) || null,
+    dispositivo: deducirDispositivo(req.actor && req.actor.userAgent),
+    fecha
+  };
+
+  // Buscamos el hash del último registro para encadenar este ("0" si es el primero)
+  db.query("SELECT hash FROM auditoria ORDER BY id DESC LIMIT 1", (errU, rows) => {
+    if (errU) return console.error('⚠ Auditoría no registrada:', errU.message);
+    const hashPrevio = (rows[0] && rows[0].hash) ? rows[0].hash : GENESIS_AUDITORIA;
+    const hash = calcularHashAuditoria(reg, hashPrevio);
+
+    const sql = "INSERT INTO auditoria (usuario_id, usuario_nombre, rol, accion, detalle, ip, dispositivo, fecha, hash, hash_previo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    db.query(sql, [reg.usuario_id, reg.usuario_nombre, reg.rol, reg.accion, reg.detalle, reg.ip, reg.dispositivo, reg.fecha, hash, hashPrevio], (err) => {
+      if (err) console.error('⚠ Auditoría no registrada:', err.message);
+    });
+  });
+}
+
+// Consulta de logs para el panel del admin: del más reciente al más antiguo,
+// con filtro opcional ?q= (por usuario o acción). Consulta parametrizada.
+app.get('/api/admin/auditoria', (req, res) => {
+  const q = String(req.query.q || '').trim();
+  let sql = "SELECT * FROM auditoria";
+  const params = [];
+  if (q) {
+    sql += " WHERE usuario_nombre LIKE ? OR accion LIKE ? OR rol LIKE ?";
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+  }
+  sql += " ORDER BY id DESC LIMIT 200";
+  db.query(sql, params, (err, rows) => {
+    if (err) return res.status(500).json(err);
+    res.json(rows);
+  });
+});
+
+// Verifica la INTEGRIDAD de la bitácora: recorre todos los registros en orden,
+// recalcula el hash de cada uno y comprueba el encadenado con el anterior
+// (mismo principio que /api/blockchain/verificar, pero sobre los logs).
+app.get('/api/admin/auditoria/verificar', (req, res) => {
+  db.query("SELECT * FROM auditoria ORDER BY id ASC", (err, rows) => {
+    if (err) return res.status(500).json(err);
+    let integra = true;
+    let primerError = null;
+    let hashPrevioEsperado = GENESIS_AUDITORIA;
+
+    for (const r of rows) {
+      const hashRecalculado = calcularHashAuditoria(r, r.hash_previo);
+      const hashIntacto = hashRecalculado === r.hash;              // ¿los datos coinciden con su hash?
+      const enlaceIntacto = r.hash_previo === hashPrevioEsperado;  // ¿enlaza con el registro anterior?
+      if (!(hashIntacto && enlaceIntacto) && integra) {
+        integra = false;
+        primerError = {
+          id: r.id,
+          accion: r.accion,
+          motivo: !hashIntacto ? 'DATOS_ALTERADOS' : 'ENLACE_ROTO'
+        };
+      }
+      hashPrevioEsperado = r.hash; // el siguiente registro debe apuntar a ESTE hash
+    }
+    res.json({ integra, longitud: rows.length, primer_error: primerError });
+  });
+});
+
 // Devuelve (en el callback) las materias que ya llegaron al tope de docentes.
 // excludeDocenteId permite ignorar al propio docente al editar.
 function materiasSinCupo(materiaIds, excludeDocenteId, cb) {
@@ -58,6 +183,9 @@ app.post('/api/login', (req, res) => {
     if (result.length === 0 || !bcrypt.compareSync(password || '', result[0].password)) {
       return res.status(401).json({ message: "Usuario no encontrado o clave incorrecta" });
     }
+    // En el login las cabeceras de identidad aún no llegan: usamos al usuario autenticado
+    registrarAuditoria(req, 'INICIO_SESION', `Ingresó al sistema (${result[0].identificador})`,
+      { usuario_id: result[0].id, nombre: result[0].identificador, rol: result[0].rol });
     res.json({ user: usuarioSinPassword(result[0]), token: 'sesion-activa-eceme' });
   });
 });
@@ -68,6 +196,7 @@ app.post('/api/usuarios/cambiar-password', (req, res) => {
   const sql = "UPDATE usuarios SET password = ?, primer_login = 0 WHERE id = ?";
   db.query(sql, [hash, usuario_id], (err, result) => {
     if (err) return res.status(500).json(err);
+    registrarAuditoria(req, 'CAMBIO_PASSWORD', `Cambió su contraseña (usuario #${usuario_id})`);
     res.json({ message: "Contraseña actualizada correctamente" });
   });
 });
@@ -80,6 +209,10 @@ app.post('/api/admin/usuarios/:usuarioId/reset-password', (req, res) => {
   db.query(sql, [hash, req.params.usuarioId], (err, result) => {
     if (err) return res.status(500).json(err);
     if (result.affectedRows === 0) return res.status(404).json({ message: "Usuario no encontrado" });
+    db.query("SELECT identificador FROM usuarios WHERE id = ?", [req.params.usuarioId], (e2, rows) => {
+      const quien = (rows && rows[0]) ? rows[0].identificador : `#${req.params.usuarioId}`;
+      registrarAuditoria(req, 'RESET_PASSWORD', `Restableció la contraseña de ${quien} a la clave institucional`);
+    });
     res.json({ message: "Contraseña restablecida", password_temporal: PASSWORD_GENERICA });
   });
 });
@@ -159,6 +292,7 @@ app.post('/api/admin/estudiantes', (req, res) => {
       db.query("INSERT INTO estudiantes (usuario_id, nombre, codigo, ci, grado, ciclo, materia_id, docente_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       [userRes.insertId, nombreU, codigo, ci || null, gradoU, ciclo, mid, did], (err2) => {
         if (err2) return res.status(500).json(err2);
+        registrarAuditoria(req, 'CREAR_CURSANTE', `Registró al cursante ${codigo} — ${nombreU}`);
         res.json({ message: "Cursante registrado", codigo });
       });
     });
@@ -176,15 +310,17 @@ app.put('/api/admin/estudiantes/:id', (req, res) => {
   const sql = "UPDATE estudiantes SET nombre = ?, grado = ?, ciclo = ?, materia_id = ?, docente_id = ? WHERE id = ?";
   db.query(sql, [nombreU, gradoU, ciclo, mid, did, req.params.id], (err) => {
     if (err) return res.status(500).json(err);
+    registrarAuditoria(req, 'EDITAR_CURSANTE', `Editó los datos del cursante ${nombreU}`);
     res.json({ message: "Estudiante actualizado correctamente" });
   });
 });
 
 app.delete('/api/admin/estudiantes/:id', (req, res) => {
-  db.query("SELECT usuario_id FROM estudiantes WHERE id = ?", [req.params.id], (err, result) => {
+  db.query("SELECT usuario_id, nombre, codigo FROM estudiantes WHERE id = ?", [req.params.id], (err, result) => {
     if (result.length > 0) {
       db.query("DELETE FROM usuarios WHERE id = ?", [result[0].usuario_id], (err2) => {
         if (err2) return res.status(500).json(err2);
+        registrarAuditoria(req, 'ELIMINAR_CURSANTE', `Eliminó al cursante ${result[0].codigo} — ${result[0].nombre}`);
         res.json({ message: "Eliminado con éxito" });
       });
     }
@@ -234,6 +370,7 @@ app.post('/api/admin/docentes', (req, res) => {
         db.query("INSERT INTO docentes (usuario_id, nombre, codigo, ci, grado, materia_id) VALUES (?, ?, ?, ?, ?, ?)",
         [userRes.insertId, nombreU, codigo, ci || null, gradoU, primaryMateria], (err2, docRes) => {
           if (err2) return res.status(500).json(err2);
+          registrarAuditoria(req, 'CREAR_DOCENTE', `Registró al docente ${codigo} — ${nombreU}`);
           if (materiaIds.length === 0) return res.json({ message: "Docente registrado", codigo });
 
           const values = materiaIds.map(mid => [docRes.insertId, mid]);
@@ -263,6 +400,7 @@ app.put('/api/admin/docentes/:id', (req, res) => {
     db.query("UPDATE docentes SET nombre = ?, grado = ?, materia_id = ? WHERE id = ?",
     [nombreU, gradoU, primaryMateria, docenteId], (err) => {
       if (err) return res.status(500).json(err);
+      registrarAuditoria(req, 'EDITAR_DOCENTE', `Editó los datos del docente ${nombreU}`);
       // Reemplazamos las materias del docente
       db.query("DELETE FROM docente_materias WHERE docente_id = ?", [docenteId], (delErr) => {
         if (delErr) return res.status(500).json(delErr);
@@ -278,10 +416,11 @@ app.put('/api/admin/docentes/:id', (req, res) => {
 });
 
 app.delete('/api/admin/docentes/:id', (req, res) => {
-  db.query("SELECT usuario_id FROM docentes WHERE id = ?", [req.params.id], (err, result) => {
+  db.query("SELECT usuario_id, nombre, codigo FROM docentes WHERE id = ?", [req.params.id], (err, result) => {
     if (result.length > 0) {
       db.query("DELETE FROM usuarios WHERE id = ?", [result[0].usuario_id], (err2) => {
         if (err2) return res.status(500).json(err2);
+        registrarAuditoria(req, 'ELIMINAR_DOCENTE', `Eliminó al docente ${result[0].codigo} — ${result[0].nombre}`);
         res.json({ message: "Eliminado con éxito" });
       });
     }
@@ -294,15 +433,20 @@ app.post('/api/admin/materias', (req, res) => {
   const nombreU = (nombre || '').trim().toUpperCase();
   db.query("INSERT INTO materias (nombre, activa, ciclo) VALUES (?, 1, ?)", [nombreU, ciclo || 'PRIMER CICLO'], (err) => {
     if (err) return res.status(500).json(err);
+    registrarAuditoria(req, 'CREAR_MATERIA', `Creó la materia ${nombreU} (${ciclo || 'PRIMER CICLO'})`);
     res.json({ message: "Materia creada" });
   });
 });
 
 // Eliminar materia (las notas/evaluaciones/relaciones asociadas se borran en cascada)
 app.delete('/api/admin/materias/:id', (req, res) => {
-  db.query("DELETE FROM materias WHERE id = ?", [req.params.id], (err) => {
-    if (err) return res.status(500).json(err);
-    res.json({ message: "Materia eliminada" });
+  db.query("SELECT nombre FROM materias WHERE id = ?", [req.params.id], (errS, rows) => {
+    const nombreMateria = (rows && rows[0]) ? rows[0].nombre : `#${req.params.id}`;
+    db.query("DELETE FROM materias WHERE id = ?", [req.params.id], (err) => {
+      if (err) return res.status(500).json(err);
+      registrarAuditoria(req, 'ELIMINAR_MATERIA', `Eliminó la materia ${nombreMateria}`);
+      res.json({ message: "Materia eliminada" });
+    });
   });
 });
 
@@ -326,6 +470,7 @@ app.post('/api/admin/criterios', (req, res) => {
   const { pregunta } = req.body;
   db.query("INSERT INTO criterios_evaluacion (pregunta) VALUES (?)", [pregunta], (err) => {
     if (err) return res.status(500).json(err);
+    registrarAuditoria(req, 'CREAR_CRITERIO', `Agregó el criterio de evaluación: "${pregunta}"`);
     res.json({ message: "Criterio agregado" });
   });
 });
@@ -337,6 +482,7 @@ app.post('/api/configuracion', (req, res) => {
     if (result.affectedRows === 0) {
       db.query("INSERT INTO configuracion (id, comandante_nombre, gestion) VALUES (1, ?, '2026')", [comandante_nombre]);
     }
+    registrarAuditoria(req, 'CAMBIO_COMANDANTE', `Actualizó el comandante a: ${comandante_nombre}`);
     res.json({ message: "Comandante actualizado" });
   });
 });
@@ -354,6 +500,7 @@ app.post('/api/notas', (req, res) => {
 app.post('/api/notas/publicar-lote', (req, res) => {
   db.query("UPDATE notas SET publicado = 1", (err) => {
     if (err) return res.status(500).json(err);
+    registrarAuditoria(req, 'PUBLICAR_NOTAS', 'Publicó el tablero de notas (lote completo)');
     res.json({ message: "Tablero publicado" });
   });
 });
@@ -455,6 +602,7 @@ app.post('/api/actas/publicar', (req, res) => {
             if (materiaId) { upd += " WHERE materia_id = ?"; uParams.push(materiaId); }
             db.query(upd, uParams, (errUp) => {
               if (errUp) return res.status(500).json(errUp);
+              registrarAuditoria(req, 'PUBLICAR_ACTA', `Publicó el acta "${acta.materia}" y la selló como bloque #${indice} de la cadena`);
               res.json({ message: "Acta publicada y sellada en la cadena", indice, hash });
             });
           });
@@ -564,6 +712,111 @@ app.get('/api/notas/docente-historial/:id', (req, res) => {
   db.query(sql, [req.params.id], (err, result) => {
     if (err) return res.status(500).json(err);
     res.json(result);
+  });
+});
+
+// ============================================================
+//  REPORTES — datos para las actas oficiales listas para imprimir
+//  (el PDF se arma en el frontend con jsPDF; aquí solo van los datos)
+// ============================================================
+
+// --- Reporte 1: ACTA OFICIAL DE CALIFICACIONES de una materia ---
+// Lista nominal ordenada de mayor a menor por nota final. Si la materia ya
+// fue sellada como bloque en la cadena, se incluye número de bloque y hash.
+app.get('/api/reportes/acta/:materiaId', (req, res) => {
+  const materiaId = parseInt(req.params.materiaId);
+  if (!materiaId) return res.status(400).json({ message: "ID de materia inválido" });
+
+  db.query("SELECT nombre, ciclo FROM materias WHERE id = ?", [materiaId], (errM, matRows) => {
+    if (errM) return res.status(500).json(errM);
+    if (matRows.length === 0) return res.status(404).json({ message: "Materia no encontrada" });
+
+    const sql = `
+      SELECT e.codigo, e.nombre, e.grado,
+             n.parcial_1, n.parcial_final, n.trabajos, n.nota_final
+      FROM notas n
+      JOIN estudiantes e ON n.estudiante_id = e.id
+      WHERE n.materia_id = ?
+      ORDER BY n.nota_final DESC, e.nombre ASC`;
+    db.query(sql, [materiaId], (err, registros) => {
+      if (err) return res.status(500).json(err);
+      if (registros.length === 0) return res.status(400).json({ message: "La materia no tiene notas registradas" });
+
+      db.query("SELECT comandante_nombre, gestion FROM configuracion LIMIT 1", (errC, cfgRows) => {
+        if (errC) return res.status(500).json(errC);
+        const cfg = cfgRows[0] || { comandante_nombre: 'POR ASIGNAR', gestion: '2026' };
+
+        // ¿La materia ya está sellada en la cadena? (último bloque de esa materia)
+        db.query("SELECT indice, hash FROM bloques WHERE materia_id = ? ORDER BY indice DESC LIMIT 1",
+        [materiaId], (errB, bloqueRows) => {
+          if (errB) return res.status(500).json(errB);
+          res.json({
+            materia: matRows[0].nombre,
+            ciclo: matRows[0].ciclo,
+            gestion: cfg.gestion || '2026',
+            comandante: cfg.comandante_nombre || 'POR ASIGNAR',
+            sello: bloqueRows.length > 0 ? { bloque: bloqueRows[0].indice, hash: bloqueRows[0].hash } : null,
+            registros
+          });
+        });
+      });
+    });
+  });
+});
+
+// --- Reporte 2: DESEMPEÑO DE LOS DOCENTES ---
+// Por docente y materia: promedio de cada criterio convertido a escala /100
+// (promedio 1–5 × 20, como el modelo oficial) y TOTAL de la materia.
+// Además el promedio general de cada docente sobre todas sus materias.
+app.get('/api/reportes/desempeno-docente', (req, res) => {
+  db.query("SELECT id, pregunta FROM criterios_evaluacion ORDER BY orden, id", (errCr, criterios) => {
+    if (errCr) return res.status(500).json(errCr);
+
+    const sql = `
+      SELECT ed.docente_id, d.nombre AS docente, d.grado,
+             ed.materia_id, m.nombre AS materia,
+             ed.criterio_id, AVG(ed.puntuacion) AS promedio
+      FROM evaluaciones_docentes ed
+      JOIN docentes d ON ed.docente_id = d.id
+      JOIN materias m ON ed.materia_id = m.id
+      GROUP BY ed.docente_id, d.nombre, d.grado, ed.materia_id, m.nombre, ed.criterio_id
+      ORDER BY d.nombre, m.nombre, ed.criterio_id`;
+    db.query(sql, (err, filas) => {
+      if (err) return res.status(500).json(err);
+
+      db.query("SELECT comandante_nombre, gestion FROM configuracion LIMIT 1", (errC, cfgRows) => {
+        if (errC) return res.status(500).json(errC);
+        const cfg = cfgRows[0] || { comandante_nombre: 'POR ASIGNAR', gestion: '2026' };
+
+        // Agrupamos: docente -> materia -> { criterio_id: nota /100 }
+        const porDocente = {};
+        filas.forEach(f => {
+          if (!porDocente[f.docente_id]) porDocente[f.docente_id] = { docente_id: f.docente_id, docente: f.docente, grado: f.grado, materias: {} };
+          const doc = porDocente[f.docente_id];
+          if (!doc.materias[f.materia_id]) doc.materias[f.materia_id] = { materia_id: f.materia_id, materia: f.materia, notas: {} };
+          // Escala 1–5 → sobre 100 (× 20), redondeado a 2 decimales
+          doc.materias[f.materia_id].notas[f.criterio_id] = Math.round(Number(f.promedio) * 20 * 100) / 100;
+        });
+
+        const docentes = Object.values(porDocente).map(d => {
+          const materias = Object.values(d.materias).map(mat => {
+            const valores = Object.values(mat.notas);
+            const total = valores.length ? Math.round((valores.reduce((s, v) => s + v, 0) / valores.length) * 100) / 100 : 0;
+            return { ...mat, total };
+          });
+          const promedioGeneral = materias.length
+            ? Math.round((materias.reduce((s, m) => s + m.total, 0) / materias.length) * 100) / 100 : 0;
+          return { docente_id: d.docente_id, docente: d.docente, grado: d.grado, materias, promedio_general: promedioGeneral };
+        });
+
+        res.json({
+          gestion: cfg.gestion || '2026',
+          comandante: cfg.comandante_nombre || 'POR ASIGNAR',
+          criterios,
+          docentes
+        });
+      });
+    });
   });
 });
 
