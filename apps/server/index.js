@@ -561,6 +561,9 @@ function sellarActasSecuencial(actas, res) {
 app.post('/api/actas/publicar', (req, res) => {
   const body = req.body || {};
   const materiaId = body.materia_id ? parseInt(body.materia_id) : null;
+  // Se puede publicar por materia, por CICLO (un tablero por ciclo en el admin)
+  // o general. El ciclo solo aplica cuando no se pidió una materia concreta.
+  const cicloFiltro = !materiaId && body.ciclo ? String(body.ciclo).toUpperCase() : null;
   let sql = `
     SELECT e.codigo, e.nombre AS estudiante, e.ciclo,
            n.materia_id, m.nombre AS materia,
@@ -570,6 +573,7 @@ app.post('/api/actas/publicar', (req, res) => {
     JOIN materias m ON n.materia_id = m.id`;
   const params = [];
   if (materiaId) { sql += " WHERE n.materia_id = ?"; params.push(materiaId); }
+  else if (cicloFiltro) { sql += " WHERE e.ciclo = ?"; params.push(cicloFiltro); }
   sql += " ORDER BY e.nombre";
 
   db.query(sql, params, (err, notas) => {
@@ -579,9 +583,9 @@ app.post('/api/actas/publicar', (req, res) => {
     db.query("SELECT comandante_nombre, gestion FROM configuracion LIMIT 1", (errC, cfgRows) => {
       if (errC) return res.status(500).json(errC);
       const cfg = cfgRows[0] || { comandante_nombre: 'POR ASIGNAR', gestion: '2026' };
-      const ciclo = materiaId ? (notas[0].ciclo || null) : null;
+      const ciclo = materiaId ? (notas[0].ciclo || null) : cicloFiltro;
       const acta = {
-        materia: materiaId ? notas[0].materia : 'ACTA GENERAL',
+        materia: materiaId ? notas[0].materia : (cicloFiltro ? `ACTA ${cicloFiltro}` : 'ACTA GENERAL'),
         ciclo,
         gestion: cfg.gestion || '2026',
         comandante: cfg.comandante_nombre || 'POR ASIGNAR',
@@ -600,6 +604,7 @@ app.post('/api/actas/publicar', (req, res) => {
             let upd = "UPDATE notas SET publicado = 1";
             const uParams = [];
             if (materiaId) { upd += " WHERE materia_id = ?"; uParams.push(materiaId); }
+            else if (cicloFiltro) { upd += " WHERE estudiante_id IN (SELECT id FROM estudiantes WHERE ciclo = ?)"; uParams.push(cicloFiltro); }
             db.query(upd, uParams, (errUp) => {
               if (errUp) return res.status(500).json(errUp);
               registrarAuditoria(req, 'PUBLICAR_ACTA', `Publicó el acta "${acta.materia}" y la selló como bloque #${indice} de la cadena`);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
 import { useNavigate } from 'react-router-dom';
-import { ScrollText, Search, RefreshCw, ArrowLeft, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { ScrollText, Search, RefreshCw, ArrowLeft, ShieldCheck, ShieldAlert, ChevronLeft, ChevronRight } from 'lucide-react';
 import Header from '@/components/Header.jsx';
 import Footer from '@/components/Footer.jsx';
 import api from '@/lib/api';
@@ -16,6 +16,9 @@ const AuditoriaPage = () => {
   const [auditoria, setAuditoria] = useState([]);
   const [audSearch, setAudSearch] = useState('');
   const [audLoading, setAudLoading] = useState(false);
+  // Paginación: 25 registros por página para no tener que bajar toda la lista
+  const [audPage, setAudPage] = useState(1);
+  const PAGE_SIZE = 25;
   // Resultado de la verificación de integridad de la cadena de logs
   const [verif, setVerif] = useState(null);
   const [verifLoading, setVerifLoading] = useState(false);
@@ -51,6 +54,13 @@ const AuditoriaPage = () => {
     const t = setTimeout(() => fetchAuditoria(audSearch), 350);
     return () => clearTimeout(t);
   }, [audSearch]);
+  // Al recargar la lista (nueva búsqueda o refresco) vuelve a la primera página
+  useEffect(() => { setAudPage(1); }, [auditoria]);
+
+  // Corta la lista en páginas de 25
+  const audTotalPages = Math.max(1, Math.ceil(auditoria.length / PAGE_SIZE));
+  const audCurrentPage = Math.min(audPage, audTotalPages);
+  const audPageItems = auditoria.slice((audCurrentPage - 1) * PAGE_SIZE, audCurrentPage * PAGE_SIZE);
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -140,7 +150,7 @@ const AuditoriaPage = () => {
                     <tr><td colSpan="8" className="text-center p-12 font-bold text-muted-foreground tracking-widest uppercase">
                       {audLoading ? 'Cargando registros...' : 'Sin actividad registrada'}
                     </td></tr>
-                  ) : auditoria.map(log => (
+                  ) : audPageItems.map(log => (
                     <tr key={log.id} className="hover:bg-muted/30 transition-colors">
                       <td className="text-[10px] font-mono font-bold whitespace-nowrap py-3">
                         {new Date(log.fecha).toLocaleString('es-BO', { dateStyle: 'short', timeStyle: 'medium' })}
@@ -163,6 +173,31 @@ const AuditoriaPage = () => {
                 </tbody>
               </table>
             </div>
+
+            {/* Paginación: 25 registros por página */}
+            {auditoria.length > 0 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-6 pt-4 border-t-2 border-border">
+                <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  {auditoria.length} evento(s) · Página {audCurrentPage} de {audTotalPages}
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => setAudPage(p => Math.max(1, p - 1))}
+                    disabled={audCurrentPage <= 1}
+                    variant="outline"
+                    className="h-9 rounded-none border-2 font-black text-xs uppercase disabled:opacity-40">
+                    <ChevronLeft size={16} className="mr-1" /> Anterior
+                  </Button>
+                  <Button
+                    onClick={() => setAudPage(p => Math.min(audTotalPages, p + 1))}
+                    disabled={audCurrentPage >= audTotalPages}
+                    variant="outline"
+                    className="h-9 rounded-none border-2 font-black text-xs uppercase disabled:opacity-40">
+                    Siguiente <ChevronRight size={16} className="ml-1" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </main>

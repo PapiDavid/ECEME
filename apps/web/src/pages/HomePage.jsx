@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
-import { Shield, Target, Compass, Phone, Mail } from 'lucide-react';
+import { Shield, Target, Compass, Phone, Mail, MapPin, ExternalLink } from 'lucide-react';
 import Header from '@/components/Header.jsx';
 import Footer from '@/components/Footer.jsx';
 // 1. Importamos nuestra nueva configuración de API (Axios)
@@ -81,12 +81,15 @@ const HomePage = () => {
       <Header />
 
       <main className="flex-1">
-        {/* HERO SECTION */}
-        <section className="relative min-h-[85dvh] flex items-center justify-center overflow-hidden">
+        {/* HERO SECTION — queda FIJA (sticky) mientras el resto del contenido
+            sube por encima al hacer scroll. Al volver a subir, reaparece. */}
+        <section className="sticky top-0 h-[100dvh] flex items-center justify-center overflow-hidden z-0">
           <div className="absolute inset-0 bg-cover bg-center z-0" style={{
             backgroundImage: 'url(/Imagenes/bandera.png)'
           }} />
-          <div className="absolute inset-0 bg-foreground/85 z-10" />
+          {/* Velo más ligero (antes 85%) para que la imagen se vea más clara,
+              con un degradado que oscurece solo lo justo detrás del texto */}
+          <div className="absolute inset-0 bg-gradient-to-b from-foreground/45 via-foreground/55 to-foreground/70 z-10" />
           
           <div className="relative z-20 max-w-7xl mx-auto px-4 text-center">
             <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }}>
@@ -110,6 +113,11 @@ const HomePage = () => {
           </div>
         </section>
 
+        {/* CAPA DE CONTENIDO — sube POR ENCIMA de la imagen fija. El fondo sólido
+            (bg-background) y el z-10 hacen que tape la imagen al bajar; la sombra
+            superior da el efecto de que "entra" deslizándose sobre ella. */}
+        <div className="relative z-10 bg-background shadow-[0_-25px_60px_-15px_rgba(0,0,0,0.5)]">
+
         {/* MISSION SECTION */}
         <section id="mision-section" className="py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-16 items-center mb-24">
@@ -124,10 +132,16 @@ const HomePage = () => {
                 FORMAR OFICIALES SUPERIORES CON LAS COMPETENCIAS PROFESIONALES, ÉTICAS Y MORALES NECESARIAS PARA EJERCER EL COMANDO Y DESEMPEÑARSE EN LOS ESTADOS MAYORES DE LAS UNIDADES DEL EJÉRCITO.
               </p>
             </motion.div>
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }} className="order-1 md:order-2 bg-muted h-80 border-2 border-border relative flex items-center justify-center overflow-hidden group">
-              <div className="absolute inset-0 bg-[url(/Imagenes/mision.png)] bg-cover bg-center opacity-40 mix-blend-luminosity group-hover:scale-105 transition-transform duration-700"></div>
-              <div className="absolute inset-0 bg-primary mix-blend-color opacity-60"></div>
-              <Shield size={80} className="text-background/50 relative z-10" />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }} className="order-1 md:order-2 bg-muted h-80 border-2 border-border relative flex items-center justify-center overflow-hidden group shadow-xl">
+              <div className="absolute inset-0 bg-[url(/Imagenes/mision.png)] bg-cover bg-center group-hover:scale-105 transition-transform duration-700"></div>
+              {/* Degradado sutil para dar profundidad y que el icono resalte, sin teñir toda la foto */}
+              <div className="absolute inset-0 bg-gradient-to-t from-foreground/85 via-foreground/25 to-transparent"></div>
+              <div className="absolute inset-0 ring-1 ring-inset ring-primary/30"></div>
+              {/* Placa del icono con el color de la sección */}
+              <div className="relative z-10 w-20 h-20 flex items-center justify-center bg-primary border-2 border-background/40 shadow-2xl">
+                <Shield size={40} className="text-primary-foreground" />
+              </div>
+              <span className="absolute bottom-4 left-4 z-10 text-[10px] font-black tracking-[0.3em] uppercase text-background/90">Nuestra Misión</span>
             </motion.div>
           </div>
         </section>
@@ -135,10 +149,16 @@ const HomePage = () => {
         {/* VISION SECTION */}
         <section id="vision-section" className="py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }} className="bg-muted h-80 border-2 border-border relative flex items-center justify-center overflow-hidden group">
-              <div className="absolute inset-0 bg-[url(/Imagenes/vision.png)] bg-cover bg-center opacity-40 mix-blend-luminosity group-hover:scale-105 transition-transform duration-700"></div>
-              <div className="absolute inset-0 bg-accent mix-blend-color opacity-60"></div>
-              <Compass size={80} className="text-background/50 relative z-10" />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }} className="bg-muted h-80 border-2 border-border relative flex items-center justify-center overflow-hidden group shadow-xl">
+              <div className="absolute inset-0 bg-[url(/Imagenes/vision.png)] bg-cover bg-center group-hover:scale-105 transition-transform duration-700"></div>
+              {/* Degradado sutil para dar profundidad y que el icono resalte, sin teñir toda la foto */}
+              <div className="absolute inset-0 bg-gradient-to-t from-foreground/85 via-foreground/25 to-transparent"></div>
+              <div className="absolute inset-0 ring-1 ring-inset ring-accent/30"></div>
+              {/* Placa del icono con el color de la sección */}
+              <div className="relative z-10 w-20 h-20 flex items-center justify-center bg-accent border-2 border-background/40 shadow-2xl">
+                <Compass size={40} className="text-accent-foreground" />
+              </div>
+              <span className="absolute bottom-4 right-4 z-10 text-[10px] font-black tracking-[0.3em] uppercase text-background/90">Nuestra Visión</span>
             </motion.div>
             <motion.div initial={{ opacity: 0, x: 30 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true, margin: "-100px" }}>
               <div className="flex items-center space-x-4 mb-6">
@@ -165,34 +185,52 @@ const HomePage = () => {
               </p>
             </div>
             
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }} 
-              whileInView={{ opacity: 1, y: 0 }} 
-              viewport={{ once: true }} 
-              transition={{ duration: 0.6 }} 
-              className="flex flex-col lg:flex-row items-center justify-center gap-12 max-w-5xl mx-auto"
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.6 }}
+              className="max-w-5xl mx-auto"
             >
-              {/* Contenedor de la Imagen del Mapa */}
-              <div className="w-full lg:w-3/5 h-[400px] border-4 border-card shadow-2xl overflow-hidden grayscale hover:grayscale-0 transition-all duration-700 relative group rounded-sm bg-black">
-                <img 
-                  // ⚠️ Pon una captura clara del mapa de la zona en tu carpeta public
-                  src="/Imagenes/Mapa.png" 
-                  alt="Mapa de Ubicación ECEME" 
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 opacity-80 group-hover:opacity-100"
+              {/* Mapa interactivo (Google Maps embebido) con marco militar */}
+              <div className="border-4 border-card shadow-2xl overflow-hidden rounded-sm relative bg-black">
+                {/* Cinta con los colores de la bandera de Bolivia */}
+                <div className="h-1.5 w-full flex">
+                  <div className="h-full flex-1 bg-[#D52B1E]"></div>
+                  <div className="h-full flex-1 bg-[#F9E000]"></div>
+                  <div className="h-full flex-1 bg-[#007A33]"></div>
+                </div>
+                {/* Chapa/etiqueta con la ubicación */}
+                <div className="absolute top-6 left-4 z-10 pointer-events-none">
+                  <div className="flex items-center gap-2 bg-foreground/90 text-background px-4 py-2 border-l-4 border-primary shadow-lg backdrop-blur-sm">
+                    <MapPin size={16} className="text-primary" />
+                    <span className="text-[10px] font-black tracking-widest uppercase">Escuela de Comando y Estado Mayor</span>
+                  </div>
+                </div>
+                <iframe
+                  title="Ubicación de la ECEME en Google Maps"
+                  src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d1871.1368813740125!2d-66.16110335567785!3d-17.39748037323711!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x93e373f38d2a2f7b%3A0xaa0e63b70fa18a4e!2sEscuela%20De%20Comando%20Y%20Estado%20Mayor!5e1!3m2!1ses-419!2sbo!4v1784919606905!5m2!1ses-419!2sbo"
+                  className="w-full h-[380px] md:h-[460px] block"
+                  style={{ border: 0 }}
+                  allowFullScreen
+                  loading="lazy"
+                  referrerPolicy="strict-origin-when-cross-origin"
                 />
-                <div className="absolute inset-0 bg-primary/10 mix-blend-color pointer-events-none"></div>
-                
-                {/* Capa de acción rápida al pasar el mouse */}
-                <a 
+              </div>
+
+              {/* Acciones bajo el mapa */}
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-8">
+                <a
                   href="https://maps.app.goo.gl/ymYVu2m7FvL6aBtb9"
-                  target="_blank" 
+                  target="_blank"
                   rel="noopener noreferrer"
-                  className="absolute inset-0 flex items-center justify-center bg-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                  className="inline-flex items-center gap-2 bg-primary text-primary-foreground font-black px-6 py-3 text-xs uppercase tracking-widest border-2 border-black shadow-xl hover:bg-primary/90 transition-colors"
                 >
-                  <span className="bg-primary text-primary-foreground font-black px-6 py-3 text-xs uppercase tracking-widest border-2 border-black shadow-xl">
-                    Abrir en Google Maps
-                  </span>
+                  <ExternalLink size={16} /> Abrir en Google Maps
                 </a>
+                <span className="inline-flex items-center gap-2 text-[10px] font-bold text-muted-foreground tracking-widest uppercase">
+                  <MapPin size={14} className="text-primary" /> Cochabamba · Bolivia
+                </span>
               </div>
             </motion.div>
           </div>
@@ -240,6 +278,7 @@ const HomePage = () => {
             </div>
           </div>
         </section>
+        </div>
       </main>
 
       <Footer />

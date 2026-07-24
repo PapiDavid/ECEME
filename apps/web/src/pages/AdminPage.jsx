@@ -38,8 +38,10 @@ const AdminPage = () => {
   const [materiaName, setMateriaName] = useState('');
   const [materiaCiclo, setMateriaCiclo] = useState('PRIMER CICLO');
   const [comandanteName, setComandanteName] = useState('');
-  // Materia elegida para descargar su acta oficial en PDF
-  const [actaMateriaId, setActaMateriaId] = useState('');
+  // Materia elegida para descargar su acta oficial en PDF (una por cada ciclo,
+  // porque ahora el Consolidado tiene un tablero independiente por ciclo)
+  const [actaMatPrimer, setActaMatPrimer] = useState('');
+  const [actaMatSegundo, setActaMatSegundo] = useState('');
 
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
@@ -49,6 +51,10 @@ const AdminPage = () => {
   const [dirSearch, setDirSearch] = useState('');
   const [dirPage, setDirPage] = useState(1);
   const PAGE_SIZE = 10;
+
+  // Paginación del Consolidado Académico: una por cada tablero de ciclo
+  const [consPagePrimer, setConsPagePrimer] = useState(1);
+  const [consPageSegundo, setConsPageSegundo] = useState(1);
 
 
   const fetchData = async () => {
@@ -81,12 +87,14 @@ const AdminPage = () => {
 
   useEffect(() => { fetchData(); }, []);
 
-  const handlePublishNotes = async () => {
-    if (!window.confirm('¿PUBLICAR CALIFICACIONES EN EL TABLERO OFICIAL?\n\nEL ACTA QUEDARÁ SELLADA COMO UN BLOQUE INMUTABLE EN LA CADENA (BLOCKCHAIN).')) return;
+  // Publica el acta de UN ciclo (PRIMER/SEGUNDO) y la sella como bloque encadenado
+  // (SHA-256) — core del proyecto. Cada ciclo genera su propio bloque, pero todos
+  // cuelgan de la MISMA cadena: el bloque del 2do ciclo enlaza con el del 1ro.
+  const handlePublishNotes = async (ciclo) => {
+    if (!window.confirm(`¿PUBLICAR LAS CALIFICACIONES DEL ${ciclo}?\n\nEL ACTA QUEDARÁ SELLADA COMO UN BLOQUE INMUTABLE EN LA CADENA (BLOCKCHAIN).`)) return;
     try {
-      // Publica el acta y la sella como bloque encadenado (SHA-256) — core del proyecto
-      const { data } = await api.post('/actas/publicar', {});
-      toast.success(`ACTA PUBLICADA Y SELLADA EN LA CADENA (BLOQUE #${data.indice})`);
+      const { data } = await api.post('/actas/publicar', { ciclo });
+      toast.success(`ACTA DEL ${ciclo} SELLADA EN LA CADENA (BLOQUE #${data.indice})`);
       fetchData();
     } catch (err) {
       toast.error(err.response?.data?.message?.toUpperCase?.() || 'ERROR AL PUBLICAR');
@@ -214,6 +222,23 @@ const AdminPage = () => {
   const changeDirTab = (tab) => { setDirTab(tab); setDirPage(1); };
   const changeDirSearch = (v) => { setDirSearch(v); setDirPage(1); };
 
+  // Consolidado Académico dividido en dos tableros por ciclo. Cada uno con sus
+  // notas, sus materias (para el acta) y su propia paginación de 10 filas.
+  const notasPrimer = notasPendientes.filter(n => n.ciclo === 'PRIMER CICLO');
+  const notasSegundo = notasPendientes.filter(n => n.ciclo === 'SEGUNDO CICLO');
+  const materiasPrimer = materias.filter(m => m.ciclo === 'PRIMER CICLO');
+  const materiasSegundo = materias.filter(m => m.ciclo === 'SEGUNDO CICLO');
+
+  // Devuelve los datos de paginación de un tablero (página actual acotada al total)
+  const paginar = (lista, page) => {
+    const totalPages = Math.max(1, Math.ceil(lista.length / PAGE_SIZE));
+    const currentPage = Math.min(page, totalPages);
+    const items = lista.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+    return { totalPages, currentPage, items };
+  };
+  const pagPrimer = paginar(notasPrimer, consPagePrimer);
+  const pagSegundo = paginar(notasSegundo, consPageSegundo);
+
   // ============================================================
   //  MÓDULO DE REPORTES — actas oficiales listas para imprimir (jsPDF)
   // ============================================================
@@ -255,10 +280,10 @@ const AdminPage = () => {
   const nota2 = (v) => Number(v).toFixed(2);
 
   // --- Reporte 1: ACTA OFICIAL DE CALIFICACIONES (materia elegida) ---
-  const descargarActaOficial = async () => {
-    if (!actaMateriaId) return toast.error('SELECCIONE UNA MATERIA PARA EL ACTA');
+  const descargarActaOficial = async (materiaId) => {
+    if (!materiaId) return toast.error('SELECCIONE UNA MATERIA PARA EL ACTA');
     try {
-      const { data } = await api.get(`/reportes/acta/${actaMateriaId}`);
+      const { data } = await api.get(`/reportes/acta/${materiaId}`);
       const doc = new jsPDF({ format: 'letter' });
       const cx = doc.internal.pageSize.getWidth() / 2;
       let y = encabezadoInstitucional(doc);
@@ -431,6 +456,88 @@ const AdminPage = () => {
       toast.error(err.response?.data?.message?.toUpperCase?.() || 'ERROR AL GENERAR EL REPORTE');
     }
   };
+
+  // Un tablero del Consolidado (idéntico para cada ciclo). No es un componente:
+  // es una función que devuelve JSX, así que todo el estado vive en la página y
+  // no hay remontajes. Cada tablero publica y descarga SOLO lo de su ciclo.
+  const renderTablero = ({ titulo, ciclo, pag, materiasCiclo, actaMat, setActaMat, setPage, totalNotas }) => (
+    <div className="bg-card border-2 border-border p-5 shadow-xl flex flex-col">
+      <div className="flex items-center justify-between border-b-2 border-primary pb-3 mb-4 gap-2">
+        <h3 className="font-black uppercase tracking-tighter flex items-center text-base md:text-lg">
+          <BookOpen className="mr-2 text-primary shrink-0" size={20} /> {titulo}
+        </h3>
+        <span className="text-[9px] font-black uppercase bg-primary/10 text-primary px-2 py-1 rounded-sm whitespace-nowrap shrink-0">{totalNotas} nota(s)</span>
+      </div>
+
+      {/* Publicar el acta de ESTE ciclo (sella su bloque) + descargar su acta oficial */}
+      <div className="flex flex-col gap-2 mb-4">
+        <Button onClick={() => handlePublishNotes(ciclo)} className="w-full bg-destructive text-destructive-foreground font-black text-xs uppercase h-11 rounded-none border-b-4 border-black/20">
+          <RefreshCw size={16} className="mr-2 shrink-0" /> Publicar acta · {titulo}
+        </Button>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Select value={actaMat} onValueChange={setActaMat}>
+            <SelectTrigger className="h-11 flex-1 font-bold text-[10px] uppercase border-2 border-primary rounded-none">
+              <SelectValue placeholder="MATERIA DEL ACTA..." />
+            </SelectTrigger>
+            <SelectContent>
+              {materiasCiclo.map(m => (
+                <SelectItem key={m.id} value={String(m.id)}>{m.nombre}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button onClick={() => descargarActaOficial(actaMat)} variant="outline" className="w-full sm:w-auto border-2 border-primary font-bold text-[11px] uppercase h-11 rounded-none shadow-sm shrink-0">
+            <FileDown size={16} className="mr-2 shrink-0" /> Acta oficial
+          </Button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto flex-1">
+        <table className="military-table w-full">
+          <thead>
+            <tr>
+              <th className="text-[10px] uppercase">CURSANTE</th>
+              <th className="text-[10px] uppercase">MATERIA</th>
+              <th className="text-center text-[10px] uppercase">NOTA FINAL</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pag.items.length === 0 ? (
+              <tr><td colSpan="3" className="text-center p-10 font-bold text-muted-foreground tracking-widest uppercase text-[11px]">Sin planillas en este ciclo</td></tr>
+            ) : (
+              pag.items.map(n => (
+                <tr key={n.id} className="hover:bg-muted/30">
+                  <td className="font-bold uppercase text-[11px] py-3">{n.nombre_estudiante}</td>
+                  <td className="uppercase text-[10px] font-bold text-muted-foreground">{n.nombre_materia}</td>
+                  <td className="text-center font-black">
+                    <span className={`px-2 py-1 rounded-sm ${n.nota_final >= 51 ? 'bg-primary/10 text-primary' : 'bg-destructive/10 text-destructive'}`}>
+                      {Number(n.nota_final).toFixed(2)}
+                    </span>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Paginación: 10 filas por página */}
+      {pag.items.length > 0 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-5 pt-4 border-t-2 border-border">
+          <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            Página {pag.currentPage} de {pag.totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={pag.currentPage <= 1} variant="outline" className="h-9 rounded-none border-2 font-black text-xs uppercase disabled:opacity-40">
+              <ChevronLeft size={16} className="mr-1" /> Anterior
+            </Button>
+            <Button onClick={() => setPage(p => Math.min(pag.totalPages, p + 1))} disabled={pag.currentPage >= pag.totalPages} variant="outline" className="h-9 rounded-none border-2 font-black text-xs uppercase disabled:opacity-40">
+              Siguiente <ChevronRight size={16} className="ml-1" />
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -717,70 +824,31 @@ const AdminPage = () => {
               </div>
             </div>
 
-            {/* Consolidado Académico */}
-            <div className="bg-card border-2 border-border p-6 shadow-xl">
-               <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-                 <div>
-                   <h2 className="font-black uppercase tracking-tighter flex items-center text-xl"><BookOpen className="mr-3 text-primary"/> Consolidado Académico</h2>
-                   <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Control centralizado de calificaciones MySQL</p>
-                 </div>
-                 <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
-                   <Button onClick={handlePublishNotes} className="bg-destructive text-destructive-foreground font-black text-xs uppercase h-11 px-8 rounded-none border-b-4 border-black/20">
-                     <RefreshCw size={16} className="mr-2" /> Publicar Tablero
-                   </Button>
-                   {/* Módulo de reportes: acta oficial (por materia) y desempeño docente */}
-                   <div className="flex gap-2 items-center">
-                     <Select value={actaMateriaId} onValueChange={setActaMateriaId}>
-                       <SelectTrigger className="h-11 w-56 font-bold text-[10px] uppercase border-2 border-primary rounded-none">
-                         <SelectValue placeholder="MATERIA DEL ACTA..." />
-                       </SelectTrigger>
-                       <SelectContent>
-                         {materias.map(m => (
-                           <SelectItem key={m.id} value={String(m.id)}>
-                             {m.nombre} · {m.ciclo === 'PRIMER CICLO' ? '1ER' : '2DO'}
-                           </SelectItem>
-                         ))}
-                       </SelectContent>
-                     </Select>
-                     <Button onClick={descargarActaOficial} variant="outline" className="border-2 border-primary font-bold text-xs uppercase h-11 rounded-none shadow-sm">
-                       <FileDown size={16} className="mr-2" /> Descargar acta oficial
-                     </Button>
-                   </div>
-                   <Button onClick={descargarDesempenoDocente} variant="outline" className="border-2 border-accent font-bold text-xs uppercase h-11 rounded-none shadow-sm">
-                     <FileDown size={16} className="mr-2" /> Reporte de desempeño docente
-                   </Button>
-                 </div>
-               </div>
-               <div className="overflow-x-auto">
-                  <table className="military-table w-full">
-                    <thead>
-                      <tr>
-                        <th className="text-[10px] uppercase">CURSANTE</th>
-                        <th className="text-[10px] uppercase">MATERIA</th>
-                        <th className="text-[10px] uppercase">CICLO</th>
-                        <th className="text-center text-[10px] uppercase">NOTA FINAL</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {notasPendientes.length === 0 ? (
-                        <tr><td colSpan="4" className="text-center p-12 font-bold text-muted-foreground tracking-widest uppercase">No existen planillas publicadas</td></tr>
-                      ) : (
-                        notasPendientes.map(n => (
-                          <tr key={n.id} className="hover:bg-muted/30">
-                            <td className="font-bold uppercase text-[11px] py-3">{n.nombre_estudiante}</td>
-                            <td className="uppercase text-[10px] font-bold text-muted-foreground">{n.nombre_materia}</td>
-                            <td className="text-muted-foreground uppercase text-[10px] font-medium">{n.ciclo}</td>
-                            <td className="text-center font-black">
-                               <span className={`px-2 py-1 rounded-sm ${n.nota_final >= 51 ? 'bg-primary/10 text-primary' : 'bg-destructive/10 text-destructive'}`}>
-                                 {Number(n.nota_final).toFixed(2)}
-                               </span>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-               </div>
+            {/* Consolidado Académico — un tablero independiente por ciclo.
+                Cada tablero publica y descarga SÓLO su ciclo; ambos sellan sobre
+                la MISMA cadena de bloques (el 2do ciclo enlaza con el 1ro). */}
+            <div className="space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 border-b-4 border-primary pb-4">
+                <div>
+                  <h2 className="font-black uppercase tracking-tighter flex items-center text-lg md:text-xl"><BookOpen className="mr-3 text-primary shrink-0"/> Consolidado Académico</h2>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Un tablero por ciclo · cada uno sella su propia acta en la cadena</p>
+                </div>
+                <Button onClick={descargarDesempenoDocente} variant="outline" className="w-full sm:w-auto border-2 border-accent font-bold text-xs uppercase h-11 rounded-none shadow-sm shrink-0">
+                  <FileDown size={16} className="mr-2 shrink-0" /> Reporte de desempeño docente
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
+                {renderTablero({
+                  titulo: 'PRIMER CICLO', ciclo: 'PRIMER CICLO', pag: pagPrimer,
+                  materiasCiclo: materiasPrimer, totalNotas: notasPrimer.length,
+                  actaMat: actaMatPrimer, setActaMat: setActaMatPrimer, setPage: setConsPagePrimer
+                })}
+                {renderTablero({
+                  titulo: 'SEGUNDO CICLO', ciclo: 'SEGUNDO CICLO', pag: pagSegundo,
+                  materiasCiclo: materiasSegundo, totalNotas: notasSegundo.length,
+                  actaMat: actaMatSegundo, setActaMat: setActaMatSegundo, setPage: setConsPageSegundo
+                })}
+              </div>
             </div>
 
             {/* Acceso a la página de Auditoría (logs de actividad de usuarios) */}

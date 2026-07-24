@@ -1,7 +1,17 @@
 import axios from 'axios';
-const api = axios.create({
-  baseURL: 'http://localhost:3001/api'
-});
+
+// El backend (API) vive SIEMPRE en el mismo equipo que sirve esta página,
+// en el puerto 3001. Antes esto estaba fijo en "localhost", lo que rompía el
+// acceso desde otro dispositivo: en el teléfono "localhost" es el teléfono,
+// no la laptop. Ahora tomamos el host desde el que se abrió la página
+// (window.location.hostname): "localhost" cuando entras en la PC, o la IP de
+// la laptop (192.168.x.x) cuando entras desde el celular. Así funciona desde
+// cualquier dispositivo de la red sin tocar nada. Se puede forzar otra URL con
+// la variable VITE_API_URL si algún día hace falta.
+const host = window.location.hostname;
+const baseURL = import.meta.env.VITE_API_URL || `http://${host}:3001/api`;
+
+const api = axios.create({ baseURL });
 
 // Cabeceras de identidad para el módulo de AUDITORÍA: el backend las lee en
 // cada petición para saber QUIÉN hizo cada acción. El nombre va codificado

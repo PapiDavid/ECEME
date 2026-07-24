@@ -10,6 +10,11 @@ const Header = () => {
   const location = useLocation();
   const { isAuthenticated, currentUser, logout } = useAuth();
 
+  // Los botones MISIÓN/VISIÓN/TABLEROS hacen scroll a secciones que SOLO existen
+  // en la página principal. En cualquier otra página no harían nada, así que se
+  // ocultan y solo se muestran cuando estás en el inicio ("/").
+  const isHome = location.pathname === '/';
+
   const getDashboardLink = () => {
     if (!currentUser) return '/';
     if (currentUser.rol === 'admin') return '/admin';
@@ -65,19 +70,21 @@ const Header = () => {
             </Link>
           </div>
 
-          <nav className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 items-center space-x-8">
-            {navLinks.map((link) => (
-              <button
-                key={link.name}
-                onClick={link.action}
-                className={`font-bold tracking-widest text-sm px-2 py-1 transition-colors duration-300 cursor-pointer ${
-                  'text-background hover:text-primary'
-                }`}
-              >
-                {link.name}
-              </button>
-            ))}
-          </nav>
+          {isHome && (
+            <nav className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 items-center space-x-8">
+              {navLinks.map((link) => (
+                <button
+                  key={link.name}
+                  onClick={link.action}
+                  className={`font-bold tracking-widest text-sm px-2 py-1 transition-colors duration-300 cursor-pointer ${
+                    'text-background hover:text-primary'
+                  }`}
+                >
+                  {link.name}
+                </button>
+              ))}
+            </nav>
+          )}
 
           <div className="hidden md:flex items-center space-x-4">
             {isAuthenticated ? (
@@ -119,7 +126,7 @@ const Header = () => {
         {mobileMenuOpen && (
           <div className="md:hidden py-4 border-t border-background/10 bg-foreground absolute w-full left-0 px-4 shadow-xl top-[84px]">
             <nav className="flex flex-col space-y-4">
-              {navLinks.map((link) => (
+              {isHome && navLinks.map((link) => (
                 <button
                   key={link.name}
                   onClick={link.action}
@@ -128,7 +135,7 @@ const Header = () => {
                   {link.name}
                 </button>
               ))}
-              <div className="h-px bg-background/10 w-full my-2"></div>
+              {isHome && <div className="h-px bg-background/10 w-full my-2"></div>}
               {isAuthenticated ? (
                 <>
                   <p className="text-xs text-muted-foreground font-bold tracking-widest">SESIÓN INICIADA COMO {currentUser.rol}</p>
