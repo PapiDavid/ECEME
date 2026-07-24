@@ -1,0 +1,178 @@
+{
+  "fecha": "2026-07-24T02:59:42.281Z",
+  "total": 17,
+  "resisten": 16,
+  "vulnerables": 1,
+  "pruebas": [
+    {
+      "n": 1,
+      "categoria": "Inyección SQL",
+      "nombre": "Bypass de login con tautología",
+      "ataque": "identificador y contraseña = ' OR '1'='1",
+      "esperado": "Acceso denegado (401)",
+      "obtenido": "HTTP 401 — Usuario no encontrado o clave incorrecta",
+      "resiste": true,
+      "nota": null
+    },
+    {
+      "n": 2,
+      "categoria": "Inyección SQL",
+      "nombre": "Anular la verificación de contraseña con un comentario SQL",
+      "ataque": "identificador = admin@eceme.mil.bo' -- ",
+      "esperado": "Acceso denegado (401)",
+      "obtenido": "HTTP 401 — Usuario no encontrado o clave incorrecta",
+      "resiste": true,
+      "nota": null
+    },
+    {
+      "n": 3,
+      "categoria": "Inyección SQL",
+      "nombre": "Tautología en el buscador de auditoría",
+      "ataque": "GET /api/admin/auditoria?q=' OR '1'='1",
+      "esperado": "0 registros (el texto se busca literal, no se ejecuta)",
+      "obtenido": "HTTP 200 — 0 registro(s) devuelto(s)",
+      "resiste": true,
+      "nota": "Búsqueda de control sin resultados: 0 registro(s)"
+    },
+    {
+      "n": 4,
+      "categoria": "Inyección SQL",
+      "nombre": "UNION SELECT para extraer contraseñas",
+      "ataque": "q=' UNION SELECT password FROM usuarios -- ",
+      "esperado": "0 registros y ningún error de SQL expuesto",
+      "obtenido": "HTTP 200 — 0 registro(s), sin error de SQL",
+      "resiste": true,
+      "nota": null
+    },
+    {
+      "n": 5,
+      "categoria": "Inyección SQL",
+      "nombre": "Payload destructivo DROP TABLE",
+      "ataque": "'; DROP TABLE bloques; --  (en el buscador y en el login)",
+      "esperado": "La tabla bloques sigue existiendo y con los mismos registros",
+      "obtenido": "Tabla intacta: 3 bloques antes, 3 después",
+      "resiste": true,
+      "nota": null
+    },
+    {
+      "n": 6,
+      "categoria": "Inyección SQL",
+      "nombre": "Inyección en un parámetro numérico de la URL",
+      "ataque": "GET /api/reportes/acta/1 OR 1=1",
+      "esperado": "No se filtran datos de otras materias ni se expone un error de SQL",
+      "obtenido": "HTTP 404 — Materia no encontrada",
+      "resiste": true,
+      "nota": null
+    },
+    {
+      "n": 7,
+      "categoria": "Credenciales",
+      "nombre": "La respuesta del login no expone la contraseña",
+      "ataque": "Inspeccionar el JSON que devuelve POST /api/login",
+      "esperado": "El campo password no viaja al cliente",
+      "obtenido": "HTTP 200 — respuesta sin campo password",
+      "resiste": true,
+      "nota": null
+    },
+    {
+      "n": 8,
+      "categoria": "Credenciales",
+      "nombre": "Contraseñas almacenadas con hash bcrypt",
+      "ataque": "Leer directamente la columna usuarios.password en MySQL",
+      "esperado": "Ninguna contraseña legible en texto plano",
+      "obtenido": "27 de 27 usuarios con hash bcrypt · 0 en texto plano",
+      "resiste": true,
+      "nota": "Aun con acceso total a la base, las contraseñas no se pueden leer."
+    },
+    {
+      "n": 9,
+      "categoria": "Credenciales",
+      "nombre": "El error de login no revela si el usuario existe",
+      "ataque": "Comparar la respuesta de un usuario inexistente con la de una contraseña incorrecta",
+      "esperado": "Mismo código y mismo mensaje en ambos casos",
+      "obtenido": "usuario inexistente: 401 \"Usuario no encontrado o clave incorrecta\" · clave incorrecta: 401 \"Usuario no encontrado o clave incorrecta\"",
+      "resiste": true,
+      "nota": "Impide averiguar qué usuarios existen probando identificadores (enumeración)."
+    },
+    {
+      "n": 10,
+      "categoria": "Alteración de datos",
+      "nombre": "Estado inicial de la cadena de actas",
+      "ataque": "(ninguno — línea base)",
+      "esperado": "Cadena válida",
+      "obtenido": "3 bloques · válida: true",
+      "resiste": true,
+      "nota": null
+    },
+    {
+      "n": 11,
+      "categoria": "Alteración de datos",
+      "nombre": "Cambiar una nota ya sellada, directo en la base de datos",
+      "ataque": "UPDATE bloques SET acta_json = JSON_REPLACE(..., '$.registros[0].parcial_final', '95.00')",
+      "esperado": "La verificación detecta DATOS_ALTERADOS en el bloque 0",
+      "obtenido": "válida: false · primer error: bloque #0 (DATOS_ALTERADOS)",
+      "resiste": true,
+      "nota": "El atacante modificó la nota pero el hash guardado ya no coincide con el recalculado."
+    },
+    {
+      "n": 12,
+      "categoria": "Alteración de datos",
+      "nombre": "Falsificar además el hash del bloque alterado",
+      "ataque": "UPDATE bloques SET hash = SHA2(CONCAT(acta_json,'x'), 256) WHERE indice = 0",
+      "esperado": "El bloque sigue inválido y se rompe el enlace con el bloque siguiente",
+      "obtenido": "válida: false · bloque 0 válido: false · enlace del bloque 1 intacto: false",
+      "resiste": true,
+      "nota": "Para que cuadrara tendría que rehacer TODA la cadena posterior con la fórmula exacta del hash."
+    },
+    {
+      "n": 13,
+      "categoria": "Alteración de datos",
+      "nombre": "Eliminar un bloque intermedio de la cadena",
+      "ataque": "DELETE FROM bloques WHERE indice = 1",
+      "esperado": "La cadena queda rota (ENLACE_ROTO) en el bloque siguiente",
+      "obtenido": "válida: false · primer error: bloque #2 (ENLACE_ROTO)",
+      "resiste": true,
+      "nota": null
+    },
+    {
+      "n": 14,
+      "categoria": "Alteración de datos",
+      "nombre": "Modificar o borrar un bloque desde la API",
+      "ataque": "PUT / DELETE /api/blockchain/0 · POST /api/bloques",
+      "esperado": "No existe ningún endpoint que edite o borre bloques (404)",
+      "obtenido": "PUT /api/blockchain/0 → 404 · DELETE /api/blockchain/0 → 404 · POST /api/bloques → 404",
+      "resiste": true,
+      "nota": "La cadena sólo admite AÑADIR bloques; no hay ninguna vía de escritura para editarlos."
+    },
+    {
+      "n": 15,
+      "categoria": "Alteración de datos",
+      "nombre": "Borrar el rastro modificando la bitácora de auditoría",
+      "ataque": "UPDATE auditoria SET detalle = '(rastro borrado)' WHERE id = 38",
+      "esperado": "La bitácora se reporta como alterada, señalando el registro",
+      "obtenido": "íntegra antes: true → después: false · registro #38 (DATOS_ALTERADOS)",
+      "resiste": true,
+      "nota": "La bitácora tiene su propia cadena de hashes, independiente de la de actas."
+    },
+    {
+      "n": 16,
+      "categoria": "Alteración de datos",
+      "nombre": "Restauración del estado original",
+      "ataque": "(se deshacen todas las alteraciones)",
+      "esperado": "Ambas cadenas vuelven a verificarse como íntegras",
+      "obtenido": "actas válidas: true (3 bloques) · bitácora íntegra: true (38 registros)",
+      "resiste": true,
+      "nota": null
+    },
+    {
+      "n": 17,
+      "categoria": "Control de acceso",
+      "nombre": "Acceder a un endpoint de administración sin autenticarse",
+      "ataque": "GET /api/admin/auditoria sin ninguna credencial ni cabecera de sesión",
+      "esperado": "Acceso denegado (401 / 403)",
+      "obtenido": "HTTP 200 — 38 registro(s) de la bitácora entregados sin autenticación",
+      "resiste": false,
+      "nota": "La API no exige token de sesión: la protección de rutas vive sólo en el frontend."
+    }
+  ]
+}

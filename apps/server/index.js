@@ -923,10 +923,11 @@ app.post('/api/estudiantes/evaluar-docente', (req, res) => {
 
       const values = entries.map(([criterio_id, puntuacion]) => [estudiante_id, docente_id, materia_id, criterio_id, puntuacion]);
       db.query("INSERT INTO evaluaciones_docentes (estudiante_id, docente_id, materia_id, criterio_id, puntuacion) VALUES ?",
-      [values], (insErr) => {
-        if (insErr) return res.status(500).json(insErr);
-        res.json({ message: "Evaluación registrada" });
-      });
+       [values], (insErr) => {
+         if (insErr) return res.status(500).json(insErr);
+         registrarAuditoria(req, 'EVALUAR_DOCENTE', `Cursante #${estudiante_id} evaluó a su docente #${docente_id} en la materia #${materia_id} (${entries.length} criterios)`);
+         res.json({ message: "Evaluación registrada" });
+       });
     });
   });
 });
@@ -976,6 +977,7 @@ app.post('/api/notas/guardar-planilla', (req, res) => {
       trabajos = VALUES(trabajos);`;
   db.query(sql, [values], (err, result) => {
     if (err) return res.status(500).json(err);
+    registrarAuditoria(req, 'GUARDAR_PLANILLA', `Guardó la planilla de notas con ${planilla.length} registro(s) (${result.affectedRows} filas afectadas)`);
     res.json({ message: "Planilla sincronizada con éxito", affectedRows: result.affectedRows });
   });
 });

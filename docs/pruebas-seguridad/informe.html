@@ -1,0 +1,416 @@
+<title>Resistencia ante inyección y alteración de datos — ECEME</title>
+<style>
+  :root {
+    color-scheme: light;
+    --plano: #f9f9f7; --superficie: #fcfcfb;
+    --ink: #0b0b0b; --ink-2: #52514e; --ink-mudo: #898781;
+    --grid: #e1e0d9; --borde: rgba(11,11,11,0.10);
+    --bueno: #0ca30c; --texto-bueno: #006300; --critico: #d03b3b; --aviso: #fab219;
+    --acento: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --plano: #0d0d0d; --superficie: #1a1a19;
+      --ink: #ffffff; --ink-2: #c3c2b7; --ink-mudo: #898781;
+      --grid: #2c2c2a; --borde: rgba(255,255,255,0.10);
+      --texto-bueno: #0ca30c; --acento: #3987e5;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plano: #0d0d0d; --superficie: #1a1a19;
+    --ink: #ffffff; --ink-2: #c3c2b7; --ink-mudo: #898781;
+    --grid: #2c2c2a; --borde: rgba(255,255,255,0.10);
+    --texto-bueno: #0ca30c; --acento: #3987e5;
+  }
+  body {
+    margin: 0; background: var(--plano); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.55; -webkit-font-smoothing: antialiased;
+  }
+  .doc { max-width: 840px; margin: 0 auto; padding: 40px 20px 80px; }
+  header.top { border-bottom: 1px solid var(--borde); padding-bottom: 24px; margin-bottom: 8px; }
+  .kicker { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-mudo); margin: 0 0 8px; }
+  h1 { font-size: clamp(23px, 4vw, 32px); line-height: 1.2; margin: 0 0 10px; font-weight: 650; }
+  .sub { color: var(--ink-2); margin: 0; max-width: 64ch; }
+  .meta { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 13px; color: var(--ink-mudo); }
+  .meta b { color: var(--ink-2); font-weight: 550; }
+
+  .marcador { display: flex; flex-wrap: wrap; gap: 14px; margin: 28px 0 8px; }
+  .kpi { flex: 1 1 148px; background: var(--superficie); border: 1px solid var(--borde); border-radius: 12px; padding: 16px 18px; }
+  .kpi .label { font-size: 13px; color: var(--ink-2); margin: 0 0 6px; }
+  .kpi .value { font-size: 30px; font-weight: 620; letter-spacing: -0.01em; }
+  .kpi .value small { font-size: 14px; font-weight: 500; color: var(--ink-2); margin-left: 4px; }
+  .kpi .note { font-size: 12px; color: var(--ink-mudo); margin-top: 4px; }
+  .kpi .note.good { color: var(--texto-bueno); }
+
+  .cat-head { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin: 46px 0 4px; border-top: 1px solid var(--borde); padding-top: 26px; }
+  h2 { font-size: 19px; margin: 0; font-weight: 620; }
+  .cat-score { font-size: 12.5px; color: var(--ink-mudo); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .cat-score.full { color: var(--texto-bueno); font-weight: 560; }
+  .lead { color: var(--ink-2); margin: 0 0 18px; max-width: 68ch; font-size: 14.5px; }
+
+  .test { background: var(--superficie); border: 1px solid var(--borde); border-radius: 12px; padding: 15px 18px; margin: 12px 0; }
+  .test.flag { border-color: color-mix(in srgb, var(--critico) 45%, transparent); }
+  .test-head { display: flex; align-items: center; gap: 11px; margin-bottom: 10px; }
+  .test-n { flex: none; width: 22px; height: 22px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 8%, transparent);
+            color: var(--ink-2); font-size: 11.5px; font-weight: 620; display: grid; place-items: center; }
+  .test-head h3 { font-size: 15px; margin: 0; font-weight: 570; flex: 1; }
+  .badge { font-size: 11px; font-weight: 650; letter-spacing: .04em; padding: 3px 9px; border-radius: 999px; white-space: nowrap; color: #fff; }
+  .badge.ok { background: var(--bueno); }
+  .badge.bad { background: var(--critico); }
+  .badge.warn { background: var(--aviso); color: #3a2a00; }
+
+  dl { display: grid; grid-template-columns: 96px 1fr; gap: 4px 14px; margin: 0; font-size: 13.5px; }
+  dt { color: var(--ink-mudo); font-size: 12.5px; }
+  dd { margin: 0; color: var(--ink-2); }
+  dd.res { color: var(--ink); }
+  dd.nota { color: var(--ink-mudo); font-style: italic; }
+  code { background: color-mix(in srgb, var(--ink) 7%, transparent); padding: 1px 5px; border-radius: 5px;
+         font-size: .92em; word-break: break-word; }
+
+  .callout { border-left: 3px solid var(--critico); background: var(--superficie); border-radius: 0 12px 12px 0; padding: 16px 18px; margin: 20px 0; }
+  .callout.verde { border-left-color: var(--bueno); }
+  .callout h3 { margin: 0 0 6px; font-size: 15px; font-weight: 620; }
+  .callout p { margin: 0 0 8px; font-size: 14px; color: var(--ink-2); }
+  .callout p:last-child { margin-bottom: 0; }
+  ul { color: var(--ink-2); padding-left: 20px; font-size: 14px; }
+  li { margin: 5px 0; }
+  footer { margin-top: 52px; padding-top: 20px; border-top: 1px solid var(--borde); font-size: 12.5px; color: var(--ink-mudo); }
+  @media print { body { background: #fff; } .test, .kpi, .callout { break-inside: avoid; } }
+</style>
+
+<div class="doc">
+<header class="top">
+  <p class="kicker">Proyecto de grado · Ingeniería de Sistemas</p>
+  <h1>Verificación de la resistencia ante intentos de inyección y alteración de datos</h1>
+  <p class="sub">Se ejecutaron ataques reales contra el sistema web de gestión de calificaciones de la ECEME:
+  inyección SQL por sus puntos de entrada y manipulación directa de la base de datos para intentar falsear
+  notas ya selladas en la cadena de bloques.</p>
+  <div class="meta">
+    <span><b>Fecha:</b> 23 de julio de 2026 a las 10:59 p. m.</span>
+    <span><b>Objetivo:</b> backend Express + MySQL (localhost:3001)</span>
+    <span><b>Pruebas ejecutadas:</b> 17</span>
+  </div>
+</header>
+
+<div class="marcador">
+  <div class="kpi">
+    <p class="label">Pruebas superadas</p>
+    <div class="value">16<small>de 17</small></div>
+    <p class="note good">el sistema rechazó o detectó el ataque</p>
+  </div>
+  <div class="kpi">
+    <p class="label">Inyecciones SQL exitosas</p>
+    <div class="value">0</div>
+    <p class="note good">todas las consultas van parametrizadas</p>
+  </div>
+  <div class="kpi">
+    <p class="label">Alteraciones no detectadas</p>
+    <div class="value">0</div>
+    <p class="note good">la cadena delató cada modificación</p>
+  </div>
+  <div class="kpi">
+    <p class="label">Hallazgos por corregir</p>
+    <div class="value">1</div>
+    <p class="note">Control de acceso</p>
+  </div>
+</div>
+
+
+<section>
+  <div class="cat-head">
+    <h2>Inyección SQL</h2>
+    <span class="cat-score full">6 / 6 superadas</span>
+  </div>
+  <p class="lead">Se enviaron cargas maliciosas a los puntos de entrada del sistema (login, buscador de la bitácora y parámetros de la URL) para intentar que la base de datos las ejecute como instrucciones.</p>
+  
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">1</span>
+      <h3>Bypass de login con tautología</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>identificador y contraseña = ' OR '1'='1</code></dd>
+      <dt>Se esperaba</dt><dd>Acceso denegado (401)</dd>
+      <dt>Resultado</dt><dd class="res">HTTP 401 — Usuario no encontrado o clave incorrecta</dd>
+      
+    </dl>
+  </article>
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">2</span>
+      <h3>Anular la verificación de contraseña con un comentario SQL</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>identificador = admin@eceme.mil.bo' -- </code></dd>
+      <dt>Se esperaba</dt><dd>Acceso denegado (401)</dd>
+      <dt>Resultado</dt><dd class="res">HTTP 401 — Usuario no encontrado o clave incorrecta</dd>
+      
+    </dl>
+  </article>
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">3</span>
+      <h3>Tautología en el buscador de auditoría</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>GET /api/admin/auditoria?q=' OR '1'='1</code></dd>
+      <dt>Se esperaba</dt><dd>0 registros (el texto se busca literal, no se ejecuta)</dd>
+      <dt>Resultado</dt><dd class="res">HTTP 200 — 0 registro(s) devuelto(s)</dd>
+      <dt>Nota</dt><dd class="nota">Búsqueda de control sin resultados: 0 registro(s)</dd>
+    </dl>
+  </article>
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">4</span>
+      <h3>UNION SELECT para extraer contraseñas</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>q=' UNION SELECT password FROM usuarios -- </code></dd>
+      <dt>Se esperaba</dt><dd>0 registros y ningún error de SQL expuesto</dd>
+      <dt>Resultado</dt><dd class="res">HTTP 200 — 0 registro(s), sin error de SQL</dd>
+      
+    </dl>
+  </article>
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">5</span>
+      <h3>Payload destructivo DROP TABLE</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>'; DROP TABLE bloques; --  (en el buscador y en el login)</code></dd>
+      <dt>Se esperaba</dt><dd>La tabla bloques sigue existiendo y con los mismos registros</dd>
+      <dt>Resultado</dt><dd class="res">Tabla intacta: 3 bloques antes, 3 después</dd>
+      
+    </dl>
+  </article>
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">6</span>
+      <h3>Inyección en un parámetro numérico de la URL</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>GET /api/reportes/acta/1 OR 1=1</code></dd>
+      <dt>Se esperaba</dt><dd>No se filtran datos de otras materias ni se expone un error de SQL</dd>
+      <dt>Resultado</dt><dd class="res">HTTP 404 — Materia no encontrada</dd>
+      
+    </dl>
+  </article>
+</section>
+<section>
+  <div class="cat-head">
+    <h2>Alteración de datos</h2>
+    <span class="cat-score full">7 / 7 superadas</span>
+  </div>
+  <p class="lead">Se atacó la integridad de las actas selladas, modificando la base de datos <b>por fuera del sistema</b>, con acceso directo a MySQL — el peor escenario posible. También se intentó alterar la bitácora de auditoría.</p>
+  
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">10</span>
+      <h3>Estado inicial de la cadena de actas</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>(ninguno — línea base)</code></dd>
+      <dt>Se esperaba</dt><dd>Cadena válida</dd>
+      <dt>Resultado</dt><dd class="res">3 bloques · válida: true</dd>
+      
+    </dl>
+  </article>
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">11</span>
+      <h3>Cambiar una nota ya sellada, directo en la base de datos</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>UPDATE bloques SET acta_json = JSON_REPLACE(..., '$.registros[0].parcial_final', '95.00')</code></dd>
+      <dt>Se esperaba</dt><dd>La verificación detecta DATOS_ALTERADOS en el bloque 0</dd>
+      <dt>Resultado</dt><dd class="res">válida: false · primer error: bloque #0 (DATOS_ALTERADOS)</dd>
+      <dt>Nota</dt><dd class="nota">El atacante modificó la nota pero el hash guardado ya no coincide con el recalculado.</dd>
+    </dl>
+  </article>
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">12</span>
+      <h3>Falsificar además el hash del bloque alterado</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>UPDATE bloques SET hash = SHA2(CONCAT(acta_json,'x'), 256) WHERE indice = 0</code></dd>
+      <dt>Se esperaba</dt><dd>El bloque sigue inválido y se rompe el enlace con el bloque siguiente</dd>
+      <dt>Resultado</dt><dd class="res">válida: false · bloque 0 válido: false · enlace del bloque 1 intacto: false</dd>
+      <dt>Nota</dt><dd class="nota">Para que cuadrara tendría que rehacer TODA la cadena posterior con la fórmula exacta del hash.</dd>
+    </dl>
+  </article>
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">13</span>
+      <h3>Eliminar un bloque intermedio de la cadena</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>DELETE FROM bloques WHERE indice = 1</code></dd>
+      <dt>Se esperaba</dt><dd>La cadena queda rota (ENLACE_ROTO) en el bloque siguiente</dd>
+      <dt>Resultado</dt><dd class="res">válida: false · primer error: bloque #2 (ENLACE_ROTO)</dd>
+      
+    </dl>
+  </article>
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">14</span>
+      <h3>Modificar o borrar un bloque desde la API</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>PUT / DELETE /api/blockchain/0 · POST /api/bloques</code></dd>
+      <dt>Se esperaba</dt><dd>No existe ningún endpoint que edite o borre bloques (404)</dd>
+      <dt>Resultado</dt><dd class="res">PUT /api/blockchain/0 → 404 · DELETE /api/blockchain/0 → 404 · POST /api/bloques → 404</dd>
+      <dt>Nota</dt><dd class="nota">La cadena sólo admite AÑADIR bloques; no hay ninguna vía de escritura para editarlos.</dd>
+    </dl>
+  </article>
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">15</span>
+      <h3>Borrar el rastro modificando la bitácora de auditoría</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>UPDATE auditoria SET detalle = '(rastro borrado)' WHERE id = 38</code></dd>
+      <dt>Se esperaba</dt><dd>La bitácora se reporta como alterada, señalando el registro</dd>
+      <dt>Resultado</dt><dd class="res">íntegra antes: true → después: false · registro #38 (DATOS_ALTERADOS)</dd>
+      <dt>Nota</dt><dd class="nota">La bitácora tiene su propia cadena de hashes, independiente de la de actas.</dd>
+    </dl>
+  </article>
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">16</span>
+      <h3>Restauración del estado original</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>(se deshacen todas las alteraciones)</code></dd>
+      <dt>Se esperaba</dt><dd>Ambas cadenas vuelven a verificarse como íntegras</dd>
+      <dt>Resultado</dt><dd class="res">actas válidas: true (3 bloques) · bitácora íntegra: true (38 registros)</dd>
+      
+    </dl>
+  </article>
+</section>
+<section>
+  <div class="cat-head">
+    <h2>Credenciales</h2>
+    <span class="cat-score full">3 / 3 superadas</span>
+  </div>
+  <p class="lead">Se revisó cómo se guardan y se exponen las contraseñas y qué información filtran los mensajes de error.</p>
+  
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">7</span>
+      <h3>La respuesta del login no expone la contraseña</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>Inspeccionar el JSON que devuelve POST /api/login</code></dd>
+      <dt>Se esperaba</dt><dd>El campo password no viaja al cliente</dd>
+      <dt>Resultado</dt><dd class="res">HTTP 200 — respuesta sin campo password</dd>
+      
+    </dl>
+  </article>
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">8</span>
+      <h3>Contraseñas almacenadas con hash bcrypt</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>Leer directamente la columna usuarios.password en MySQL</code></dd>
+      <dt>Se esperaba</dt><dd>Ninguna contraseña legible en texto plano</dd>
+      <dt>Resultado</dt><dd class="res">27 de 27 usuarios con hash bcrypt · 0 en texto plano</dd>
+      <dt>Nota</dt><dd class="nota">Aun con acceso total a la base, las contraseñas no se pueden leer.</dd>
+    </dl>
+  </article>
+  <article class="test ">
+    <div class="test-head">
+      <span class="test-n">9</span>
+      <h3>El error de login no revela si el usuario existe</h3>
+      <span class="badge ok">✓ RESISTE</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>Comparar la respuesta de un usuario inexistente con la de una contraseña incorrecta</code></dd>
+      <dt>Se esperaba</dt><dd>Mismo código y mismo mensaje en ambos casos</dd>
+      <dt>Resultado</dt><dd class="res">usuario inexistente: 401 &quot;Usuario no encontrado o clave incorrecta&quot; · clave incorrecta: 401 &quot;Usuario no encontrado o clave incorrecta&quot;</dd>
+      <dt>Nota</dt><dd class="nota">Impide averiguar qué usuarios existen probando identificadores (enumeración).</dd>
+    </dl>
+  </article>
+</section>
+<section>
+  <div class="cat-head">
+    <h2>Control de acceso</h2>
+    <span class="cat-score ">0 / 1 superadas</span>
+  </div>
+  <p class="lead">Se comprobó si la API exige credenciales para atender peticiones a rutas de administración.</p>
+  
+  <article class="test flag">
+    <div class="test-head">
+      <span class="test-n">17</span>
+      <h3>Acceder a un endpoint de administración sin autenticarse</h3>
+      <span class="badge bad">✗ HALLAZGO</span>
+    </div>
+    <dl>
+      <dt>Ataque</dt><dd><code>GET /api/admin/auditoria sin ninguna credencial ni cabecera de sesión</code></dd>
+      <dt>Se esperaba</dt><dd>Acceso denegado (401 / 403)</dd>
+      <dt>Resultado</dt><dd class="res">HTTP 200 — 38 registro(s) de la bitácora entregados sin autenticación</dd>
+      <dt>Nota</dt><dd class="nota">La API no exige token de sesión: la protección de rutas vive sólo en el frontend.</dd>
+    </dl>
+  </article>
+</section>
+
+<section>
+  <div class="cat-head"><h2>Conclusiones</h2></div>
+  <div class="callout verde">
+    <h3>La capa blockchain cumple su función</h3>
+    <p>El ataque más fuerte que se puede montar contra este sistema es el que se hizo: entrar directamente a MySQL
+    y cambiar una nota ya publicada, sin pasar por la aplicación. Aun así <b>ninguna alteración pasó inadvertida</b>.
+    Modificar la nota rompe el hash del bloque; falsificar el hash rompe el enlace con el bloque siguiente; borrar
+    un bloque rompe la cadena. Para que el fraude cuadrara, el atacante tendría que rehacer todos los bloques
+    posteriores conociendo la fórmula exacta del hash — y lo mismo, por separado, con la bitácora de auditoría.</p>
+    <p>Las notas son, en la práctica, <b>inalterables sin dejar evidencia</b>: es exactamente lo que el proyecto se propuso demostrar.</p>
+  </div>
+
+  
+  <div class="callout">
+    <h3>Hallazgo — Acceder a un endpoint de administración sin autenticarse</h3>
+    <p><b>Qué se comprobó:</b> HTTP 200 — 38 registro(s) de la bitácora entregados sin autenticación</p>
+    <p><b>Por qué importa:</b> la protección de rutas está implementada en el frontend (React decide qué ve cada rol),
+    pero la API no la exige. Cualquiera que conozca la dirección del servidor puede consultar los datos sin pasar por la pantalla de acceso.</p>
+    <p><b>Cómo se corrige:</b> emitir un token de sesión al iniciar sesión y exigirlo en un middleware de Express
+    para las rutas <code>/api/admin/*</code> y demás endpoints sensibles, verificando además el rol.
+    Es un cambio acotado al backend y <b>no toca la capa blockchain</b>.</p>
+    <p><b>Alcance real:</b> el sistema opera en la red interna de la institución, y este hallazgo permitiría <i>leer</i>
+    o <i>escribir</i> datos operativos — pero no falsear un acta ya sellada sin que la cadena lo delate, como demuestran las pruebas anteriores.</p>
+  </div>
+</section>
+
+<section>
+  <div class="cat-head"><h2>Metodología</h2></div>
+  <ul>
+    <li><b>Automatizada:</b> las 17 pruebas están en <code>seguridad.js</code> y se ejecutan con un solo comando; los resultados quedan en <code>resultados.json</code>.</li>
+    <li><b>Ataques reales:</b> no son simulaciones. Las cargas se enviaron al servidor en funcionamiento y las alteraciones se aplicaron con sentencias <code>UPDATE</code> y <code>DELETE</code> sobre la base de datos real.</li>
+    <li><b>Criterio de éxito:</b> una prueba se supera si el ataque es <i>rechazado</i> (inyección) o <i>detectado</i> (alteración). Detectar es suficiente: la cadena no impide que alguien con acceso a MySQL escriba, sino que garantiza que no pueda hacerlo sin dejar rastro.</li>
+    <li><b>Reversibilidad:</b> se respaldó la base con <code>mysqldump</code> antes de empezar y cada alteración se deshizo dentro de la misma prueba. Al terminar, la cadena de actas y la bitácora se verificaron íntegras.</li>
+  </ul>
+</section>
+
+<footer>
+  Informe generado automáticamente a partir de <code>resultados.json</code> · Sistema web con tecnología blockchain
+  para la gestión segura de calificaciones y evaluación docente · Escuela de Comando y Estado Mayor del Ejército.
+</footer>
+</div>

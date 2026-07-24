@@ -1,0 +1,482 @@
+<title>Test de carga y estrés del nodo blockchain — ECEME</title>
+<style>
+  :root {
+    color-scheme: light;
+    --plano:        #f9f9f7;
+    --superficie:   #fcfcfb;
+    --ink:          #0b0b0b;
+    --ink-2:        #52514e;
+    --ink-mudo:     #898781;
+    --grid:         #e1e0d9;
+    --eje:          #c3c2b7;
+    --borde:        rgba(11,11,11,0.10);
+    --serie-1:      #2a78d6;
+    --serie-2:      #eb6834;
+    --bueno:        #0ca30c;
+    --critico:      #d03b3b;
+    --texto-bueno:  #006300;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --plano:      #0d0d0d;
+      --superficie: #1a1a19;
+      --ink:        #ffffff;
+      --ink-2:      #c3c2b7;
+      --ink-mudo:   #898781;
+      --grid:       #2c2c2a;
+      --eje:        #383835;
+      --borde:      rgba(255,255,255,0.10);
+      --serie-1:    #3987e5;
+      --serie-2:    #d95926;
+      --texto-bueno:#0ca30c;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plano:      #0d0d0d;
+    --superficie: #1a1a19;
+    --ink:        #ffffff;
+    --ink-2:      #c3c2b7;
+    --ink-mudo:   #898781;
+    --grid:       #2c2c2a;
+    --eje:        #383835;
+    --borde:      rgba(255,255,255,0.10);
+    --serie-1:    #3987e5;
+    --serie-2:    #d95926;
+    --texto-bueno:#0ca30c;
+  }
+
+  body {
+    margin: 0;
+    background: var(--plano);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .doc { max-width: 900px; margin: 0 auto; padding: 40px 20px 80px; }
+
+  header.top { border-bottom: 1px solid var(--borde); padding-bottom: 24px; margin-bottom: 32px; }
+  .kicker { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-mudo); margin: 0 0 8px; }
+  h1 { font-size: clamp(24px, 4vw, 34px); line-height: 1.2; margin: 0 0 10px; font-weight: 650; }
+  .sub { color: var(--ink-2); margin: 0; max-width: 62ch; }
+  .meta { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13px; color: var(--ink-mudo); }
+  .meta b { color: var(--ink-2); font-weight: 550; }
+
+  h2 { font-size: 20px; margin: 48px 0 6px; font-weight: 620; }
+  h2 + .lead { color: var(--ink-2); margin: 0 0 20px; max-width: 68ch; }
+
+  /* --- KPI --- */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin: 28px 0 8px; }
+  .kpi { background: var(--superficie); border: 1px solid var(--borde); border-radius: 12px; padding: 16px 18px; }
+  .kpi .label { font-size: 13px; color: var(--ink-2); margin: 0 0 6px; }
+  .kpi .value { font-size: 30px; font-weight: 620; letter-spacing: -0.01em; }
+  .kpi .value small { font-size: 15px; font-weight: 500; color: var(--ink-2); margin-left: 3px; }
+  .kpi .note { font-size: 12px; color: var(--ink-mudo); margin-top: 4px; }
+  .kpi .note.good { color: var(--texto-bueno); }
+
+  /* --- Tarjetas de gráfico --- */
+  .card { background: var(--superficie); border: 1px solid var(--borde); border-radius: 14px; padding: 20px 20px 12px; margin: 22px 0; }
+  .card figcaption h3 { font-size: 16px; margin: 0 0 4px; font-weight: 600; }
+  .card figcaption p { font-size: 13px; color: var(--ink-2); margin: 0; max-width: 70ch; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 14px 0 2px; font-size: 13px; color: var(--ink-2); }
+  .legend-item { display: inline-flex; align-items: center; gap: 7px; }
+  .swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; flex: none; }
+  .chart-wrap { position: relative; }
+  .chart-wrap svg { width: 100%; height: auto; display: block; overflow: visible; }
+
+  .grid  { stroke: var(--grid); stroke-width: 1; }
+  .axis  { stroke: var(--eje); stroke-width: 1; }
+  .tick  { fill: var(--ink-mudo); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .axis-title { fill: var(--ink-2); font-size: 12px; }
+  .val   { fill: var(--ink-2); font-size: 11.5px; font-weight: 600; }
+  .linea { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .punto { stroke: var(--superficie); stroke-width: 2; }
+  .hit   { fill: transparent; cursor: crosshair; }
+  .hit:hover { fill: var(--ink); fill-opacity: .035; }
+
+  .tooltip {
+    position: absolute; pointer-events: none; z-index: 5;
+    background: var(--superficie); border: 1px solid var(--borde);
+    border-radius: 9px; padding: 9px 11px; font-size: 12.5px; color: var(--ink);
+    box-shadow: 0 6px 20px rgba(0,0,0,.14); min-width: 170px;
+  }
+  .tt-title { display: block; color: var(--ink-mudo); font-size: 11.5px; margin-bottom: 5px; }
+  .tt-row { display: flex; align-items: center; gap: 7px; color: var(--ink-2); }
+  .tt-row b { margin-left: auto; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  /* --- Requisitos --- */
+  .req { background: var(--superficie); border: 1px solid var(--borde); border-radius: 12px; padding: 16px 18px; margin: 12px 0; }
+  .req-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .req-name { font-weight: 560; }
+  .badge { font-size: 11.5px; font-weight: 650; letter-spacing: .04em; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .badge.ok  { color: #fff; background: var(--bueno); }
+  .badge.bad { color: #fff; background: var(--critico); }
+  .meter { height: 8px; border-radius: 999px; background: color-mix(in srgb, var(--bueno) 18%, transparent); margin: 12px 0 10px; overflow: hidden; }
+  .meter span { display: block; height: 100%; background: var(--bueno); border-radius: 999px; }
+  .req-foot { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 12.5px; color: var(--ink-mudo); }
+  .req-foot b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .holgura { color: var(--texto-bueno); font-weight: 560; }
+
+  /* --- Tablas --- */
+  .tbl-title { font-size: 14px; font-weight: 600; margin: 26px 0 8px; color: var(--ink-2); }
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--borde); border-radius: 12px; background: var(--superficie); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 9px 12px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; font-variant-numeric: normal; }
+  thead th { font-weight: 560; color: var(--ink-2); border-bottom: 1px solid var(--borde); font-size: 12px; }
+  tbody tr + tr td { border-top: 1px solid var(--grid); }
+
+  .callout { border-left: 3px solid var(--serie-2); background: var(--superficie); border-radius: 0 12px 12px 0; padding: 14px 18px; margin: 20px 0; }
+  .callout h4 { margin: 0 0 6px; font-size: 14.5px; font-weight: 620; }
+  .callout p { margin: 0 0 8px; font-size: 14px; color: var(--ink-2); }
+  .callout p:last-child { margin-bottom: 0; }
+  code { background: color-mix(in srgb, var(--ink) 7%, transparent); padding: 1px 5px; border-radius: 5px; font-size: .9em; }
+  ul { color: var(--ink-2); padding-left: 20px; }
+  li { margin: 5px 0; }
+  footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--borde); font-size: 12.5px; color: var(--ink-mudo); }
+  @media print {
+    body { background: #fff; }
+    .card, .kpi, .req, .tbl-wrap { break-inside: avoid; }
+  }
+</style>
+
+<div class="doc">
+<header class="top">
+  <p class="kicker">Proyecto de grado · Ingeniería de Sistemas</p>
+  <h1>Test de carga y estrés del nodo blockchain</h1>
+  <p class="sub">Medición de la latencia del sistema web de gestión de calificaciones de la ECEME al
+  <b>sellar</b> y <b>verificar</b> actas encadenadas por SHA-256, sometido a niveles crecientes de usuarios concurrentes.</p>
+  <div class="meta">
+    <span><b>Fecha:</b> 23 de julio de 2026 a las 10:33 p. m.</span>
+    <span><b>Herramienta:</b> autocannon (HTTP/1.1)</span>
+    <span><b>Equipo:</b> 12th Gen Intel(R) Core(TM) i5-12450H · 12 núcleos · 15,7 GB RAM</span>
+    <span><b>Plataforma:</b> Node v24.15.0 · Windows_NT 10.0.26200</span>
+    <span><b>Cadena de partida:</b> 8 bloques · 63 registros sellados</span>
+  </div>
+</header>
+
+<section>
+  <h2>Resultados en una mirada</h2>
+  <p class="lead">Cifras obtenidas sobre 404.211 peticiones reales enviadas al nodo durante toda la campaña de pruebas.</p>
+  <div class="kpis">
+    <div class="kpi">
+      <p class="label">Latencia con 100 usuarios simultáneos</p>
+      <div class="value">40,7<small>ms</small></div>
+      <p class="note">verificación completa de la cadena</p>
+    </div>
+    <div class="kpi">
+      <p class="label">Peor latencia de consulta (p99)</p>
+      <div class="value">103<small>ms</small></div>
+      <p class="note good">19× por debajo del límite de 2 s</p>
+    </div>
+    <div class="kpi">
+      <p class="label">Rendimiento máximo sostenido</p>
+      <div class="value">3.421<small>req/s</small></div>
+      <p class="note">techo del nodo al saturarse</p>
+    </div>
+    <div class="kpi">
+      <p class="label">Errores y respuestas fallidas</p>
+      <div class="value">0</div>
+      <p class="note good">ninguna petición perdida</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>1 · Prueba de carga y estrés sobre la verificación de la cadena</h2>
+  <p class="lead">Se eligió <code>/api/blockchain/verificar</code> porque es la operación más pesada del sistema:
+  recorre todos los bloques, recalcula su hash SHA-256 y comprueba el encadenamiento. Es trabajo criptográfico real
+  y, además, sólo lee, así que no altera los datos. La carga se elevó de 1 a 200 usuarios simultáneos, 20 segundos por nivel.</p>
+  
+<figure class="card" id="g-latencia">
+  <figcaption>
+    <h3>Latencia de verificación de la cadena según usuarios concurrentes</h3>
+    <p>GET /api/blockchain/verificar — cada petición recalcula el SHA-256 de todos los bloques. 20 s por nivel.</p>
+  </figcaption>
+  <div class="legend"><span class="legend-item"><span class="swatch" style="background:var(--serie-1)"></span>Latencia promedio</span><span class="legend-item"><span class="swatch" style="background:var(--serie-2)"></span>Latencia p99 (peor caso)</span></div>
+  <div class="chart-wrap">
+    <svg viewBox="0 0 760 340" role="img" aria-label="Latencia de verificación de la cadena según usuarios concurrentes"><line class="grid" x1="62" y1="288" x2="734" y2="288"/><text class="tick" x="52" y="292" text-anchor="end">0</text><line class="grid" x1="62" y1="236" x2="734" y2="236"/><text class="tick" x="52" y="240" text-anchor="end">25</text><line class="grid" x1="62" y1="184" x2="734" y2="184"/><text class="tick" x="52" y="188" text-anchor="end">50</text><line class="grid" x1="62" y1="132" x2="734" y2="132"/><text class="tick" x="52" y="136" text-anchor="end">75</text><line class="grid" x1="62" y1="80" x2="734" y2="80"/><text class="tick" x="52" y="84" text-anchor="end">100</text><line class="grid" x1="62" y1="28" x2="734" y2="28"/><text class="tick" x="52" y="32" text-anchor="end">125</text><line class="axis" x1="62" y1="288" x2="734" y2="288"/><text class="axis-title" transform="translate(16,158) rotate(-90)" text-anchor="middle">Milisegundos (ms)</text><polyline class="linea" points="118,287.3136 230,281.0944 342,267.096 454,246.2752 566,203.4064 678,114.77759999999998" stroke="var(--serie-1)"/><polyline class="linea" points="118,283.84 230,273.44 342,252.64 454,231.84 566,179.84 678,73.76000000000002" stroke="var(--serie-2)"/><circle class="punto" cx="118" cy="287.3136" r="4.5" fill="var(--serie-1)"/><circle class="punto" cx="230" cy="281.0944" r="4.5" fill="var(--serie-1)"/><circle class="punto" cx="342" cy="267.096" r="4.5" fill="var(--serie-1)"/><circle class="punto" cx="454" cy="246.2752" r="4.5" fill="var(--serie-1)"/><circle class="punto" cx="566" cy="203.4064" r="4.5" fill="var(--serie-1)"/><circle class="punto" cx="678" cy="114.77759999999998" r="4.5" fill="var(--serie-1)"/><text class="val" x="672" y="102.77759999999998" text-anchor="end">83,28</text><circle class="punto" cx="118" cy="283.84" r="4.5" fill="var(--serie-2)"/><circle class="punto" cx="230" cy="273.44" r="4.5" fill="var(--serie-2)"/><circle class="punto" cx="342" cy="252.64" r="4.5" fill="var(--serie-2)"/><circle class="punto" cx="454" cy="231.84" r="4.5" fill="var(--serie-2)"/><circle class="punto" cx="566" cy="179.84" r="4.5" fill="var(--serie-2)"/><circle class="punto" cx="678" cy="73.76000000000002" r="4.5" fill="var(--serie-2)"/><text class="val" x="672" y="61.76000000000002" text-anchor="end">103,00</text><text class="tick" x="118" y="310" text-anchor="middle">1</text><text class="tick" x="230" y="310" text-anchor="middle">10</text><text class="tick" x="342" y="310" text-anchor="middle">25</text><text class="tick" x="454" y="310" text-anchor="middle">50</text><text class="tick" x="566" y="310" text-anchor="middle">100</text><text class="tick" x="678" y="310" text-anchor="middle">200</text><text class="axis-title" x="398" y="332" text-anchor="middle">Usuarios concurrentes</text><rect class="hit" x="62" y="28" width="112" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 1&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Latencia promedio&lt;b&gt;0,33 ms&lt;/b&gt;&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-2)&quot;&gt;&lt;/span&gt;Latencia p99 (peor caso)&lt;b&gt;2,00 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="174" y="28" width="112" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 10&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Latencia promedio&lt;b&gt;3,32 ms&lt;/b&gt;&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-2)&quot;&gt;&lt;/span&gt;Latencia p99 (peor caso)&lt;b&gt;7,00 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="286" y="28" width="112" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 25&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Latencia promedio&lt;b&gt;10,05 ms&lt;/b&gt;&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-2)&quot;&gt;&lt;/span&gt;Latencia p99 (peor caso)&lt;b&gt;17,00 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="398" y="28" width="112" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 50&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Latencia promedio&lt;b&gt;20,06 ms&lt;/b&gt;&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-2)&quot;&gt;&lt;/span&gt;Latencia p99 (peor caso)&lt;b&gt;27,00 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="510" y="28" width="112" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 100&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Latencia promedio&lt;b&gt;40,67 ms&lt;/b&gt;&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-2)&quot;&gt;&lt;/span&gt;Latencia p99 (peor caso)&lt;b&gt;52,00 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="622" y="28" width="112" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 200&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Latencia promedio&lt;b&gt;83,28 ms&lt;/b&gt;&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-2)&quot;&gt;&lt;/span&gt;Latencia p99 (peor caso)&lt;b&gt;103,00 ms&lt;/b&gt;&lt;/span&gt;"/></svg>
+    <div class="tooltip" hidden></div>
+  </div>
+</figure>
+  
+<figure class="card" id="g-rps">
+  <figcaption>
+    <h3>Rendimiento sostenido: peticiones atendidas por segundo</h3>
+    <p>El nodo se satura y mantiene su techo de rendimiento; el exceso de carga se traduce en espera, no en fallos.</p>
+  </figcaption>
+  
+  <div class="chart-wrap">
+    <svg viewBox="0 0 760 340" role="img" aria-label="Rendimiento sostenido: peticiones atendidas por segundo"><line class="grid" x1="62" y1="288" x2="734" y2="288"/><text class="tick" x="52" y="292" text-anchor="end">0</text><line class="grid" x1="62" y1="201.33333333333334" x2="734" y2="201.33333333333334"/><text class="tick" x="52" y="205.33333333333334" text-anchor="end">1.000</text><line class="grid" x1="62" y1="114.66666666666669" x2="734" y2="114.66666666666669"/><text class="tick" x="52" y="118.66666666666669" text-anchor="end">2.000</text><line class="grid" x1="62" y1="28" x2="734" y2="28"/><text class="tick" x="52" y="32" text-anchor="end">3.000</text><line class="axis" x1="62" y1="288" x2="734" y2="288"/><text class="axis-title" transform="translate(16,158) rotate(-90)" text-anchor="middle">Peticiones / segundo</text><path d="M106,288 L106,206.018 Q106,202.018 110,202.018 L126,202.018 Q130,202.018 130,206.018 L130,288 Z" fill="var(--serie-1)"/><text class="val" x="118" y="195.018" text-anchor="middle">992</text><path d="M218,288 L218,64.16199999999998 Q218,60.16199999999998 222,60.16199999999998 L238,60.16199999999998 Q242,60.16199999999998 242,64.16199999999998 L242,288 Z" fill="var(--serie-1)"/><text class="val" x="230" y="53.16199999999998" text-anchor="middle">2.629</text><path d="M330,288 L330,86.47866666666667 Q330,82.47866666666667 334,82.47866666666667 L350,82.47866666666667 Q354,82.47866666666667 354,86.47866666666667 L354,288 Z" fill="var(--serie-1)"/><text class="val" x="342" y="75.47866666666667" text-anchor="middle">2.371</text><path d="M442,288 L442,81.18333333333334 Q442,77.18333333333334 446,77.18333333333334 L462,77.18333333333334 Q466,77.18333333333334 466,81.18333333333334 L466,288 Z" fill="var(--serie-1)"/><text class="val" x="454" y="70.18333333333334" text-anchor="middle">2.433</text><path d="M554,288 L554,81.62533333333332 Q554,77.62533333333332 558,77.62533333333332 L574,77.62533333333332 Q578,77.62533333333332 578,81.62533333333332 L578,288 Z" fill="var(--serie-1)"/><text class="val" x="566" y="70.62533333333332" text-anchor="middle">2.427</text><path d="M666,288 L666,85.43866666666668 Q666,81.43866666666668 670,81.43866666666668 L686,81.43866666666668 Q690,81.43866666666668 690,85.43866666666668 L690,288 Z" fill="var(--serie-1)"/><text class="val" x="678" y="74.43866666666668" text-anchor="middle">2.383</text><text class="tick" x="118" y="310" text-anchor="middle">1</text><text class="tick" x="230" y="310" text-anchor="middle">10</text><text class="tick" x="342" y="310" text-anchor="middle">25</text><text class="tick" x="454" y="310" text-anchor="middle">50</text><text class="tick" x="566" y="310" text-anchor="middle">100</text><text class="tick" x="678" y="310" text-anchor="middle">200</text><text class="axis-title" x="398" y="332" text-anchor="middle">Usuarios concurrentes</text><rect class="hit" x="62" y="28" width="112" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 1&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Peticiones por segundo&lt;b&gt;992 req/s&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="174" y="28" width="112" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 10&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Peticiones por segundo&lt;b&gt;2.629 req/s&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="286" y="28" width="112" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 25&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Peticiones por segundo&lt;b&gt;2.371 req/s&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="398" y="28" width="112" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 50&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Peticiones por segundo&lt;b&gt;2.433 req/s&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="510" y="28" width="112" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 100&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Peticiones por segundo&lt;b&gt;2.427 req/s&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="622" y="28" width="112" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 200&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Peticiones por segundo&lt;b&gt;2.383 req/s&lt;/b&gt;&lt;/span&gt;"/></svg>
+    <div class="tooltip" hidden></div>
+  </div>
+</figure>
+  <p class="lead">La latencia crece de forma proporcional a la concurrencia mientras el rendimiento se mantiene
+  estable en su techo: el comportamiento esperado de un servidor saturado que <b>encola</b> el exceso de trabajo en lugar
+  de rechazarlo. En ningún nivel hubo peticiones perdidas ni respuestas fuera del rango 2xx.</p>
+</section>
+
+<section>
+  <h2>2 · ¿Cuánto cuesta la seguridad criptográfica?</h2>
+  <p class="lead">Comparación directa entre verificar la cadena (recalculando todos los hashes) y simplemente leerla
+  de la base de datos. La diferencia es el sobrecosto que introduce la capa blockchain.</p>
+  
+<figure class="card" id="g-comparativa">
+  <figcaption>
+    <h3>Costo real del blockchain: verificar la cadena frente a sólo leerla</h3>
+    <p>La diferencia entre ambas barras es el precio, en milisegundos, de recalcular la integridad criptográfica.</p>
+  </figcaption>
+  <div class="legend"><span class="legend-item"><span class="swatch" style="background:var(--serie-1)"></span>Verificar cadena (con SHA-256)</span><span class="legend-item"><span class="swatch" style="background:var(--serie-2)"></span>Leer cadena (sin recalcular)</span></div>
+  <div class="chart-wrap">
+    <svg viewBox="0 0 760 340" role="img" aria-label="Costo real del blockchain: verificar la cadena frente a sólo leerla"><line class="grid" x1="62" y1="288" x2="734" y2="288"/><text class="tick" x="52" y="292" text-anchor="end">0</text><line class="grid" x1="62" y1="236" x2="734" y2="236"/><text class="tick" x="52" y="240" text-anchor="end">20</text><line class="grid" x1="62" y1="184" x2="734" y2="184"/><text class="tick" x="52" y="188" text-anchor="end">40</text><line class="grid" x1="62" y1="132" x2="734" y2="132"/><text class="tick" x="52" y="136" text-anchor="end">60</text><line class="grid" x1="62" y1="80" x2="734" y2="80"/><text class="tick" x="52" y="84" text-anchor="end">80</text><line class="grid" x1="62" y1="28" x2="734" y2="28"/><text class="tick" x="52" y="32" text-anchor="end">100</text><line class="axis" x1="62" y1="288" x2="734" y2="288"/><text class="axis-title" transform="translate(16,158) rotate(-90)" text-anchor="middle">Latencia promedio (ms)</text><path d="M104.19999999999999,288 L104.19999999999999,288 Q104.19999999999999,287.142 105.05799999999999,287.142 L127.34199999999998,287.142 Q128.2,287.142 128.2,288 L128.2,288 Z" fill="var(--serie-1)"/><path d="M130.2,288 L130.2,288 Q130.2,287.428 130.772,287.428 L153.628,287.428 Q154.2,287.428 154.2,288 L154.2,288 Z" fill="var(--serie-2)"/><path d="M238.60000000000002,288 L238.60000000000002,283.368 Q238.60000000000002,279.368 242.60000000000002,279.368 L258.6,279.368 Q262.6,279.368 262.6,283.368 L262.6,288 Z" fill="var(--serie-1)"/><path d="M264.6,288 L264.6,285.812 Q264.6,281.812 268.6,281.812 L284.6,281.812 Q288.6,281.812 288.6,285.812 L288.6,288 Z" fill="var(--serie-2)"/><path d="M373,288 L373,239.844 Q373,235.844 377,235.844 L393,235.844 Q397,235.844 397,239.844 L397,288 Z" fill="var(--serie-1)"/><path d="M399,288 L399,251.804 Q399,247.804 403,247.804 L419,247.804 Q423,247.804 423,251.804 L423,288 Z" fill="var(--serie-2)"/><path d="M507.4000000000001,288 L507.4000000000001,186.25799999999998 Q507.4000000000001,182.25799999999998 511.4000000000001,182.25799999999998 L527.4000000000001,182.25799999999998 Q531.4000000000001,182.25799999999998 531.4000000000001,186.25799999999998 L531.4000000000001,288 Z" fill="var(--serie-1)"/><path d="M533.4000000000001,288 L533.4000000000001,209.45 Q533.4000000000001,205.45 537.4000000000001,205.45 L553.4000000000001,205.45 Q557.4000000000001,205.45 557.4000000000001,209.45 L557.4000000000001,288 Z" fill="var(--serie-2)"/><path d="M641.8000000000001,288 L641.8000000000001,75.47200000000001 Q641.8000000000001,71.47200000000001 645.8000000000001,71.47200000000001 L661.8000000000001,71.47200000000001 Q665.8000000000001,71.47200000000001 665.8000000000001,75.47200000000001 L665.8000000000001,288 Z" fill="var(--serie-1)"/><path d="M667.8000000000001,288 L667.8000000000001,126.094 Q667.8000000000001,122.094 671.8000000000001,122.094 L687.8000000000001,122.094 Q691.8000000000001,122.094 691.8000000000001,126.094 L691.8000000000001,288 Z" fill="var(--serie-2)"/><text class="tick" x="129.2" y="310" text-anchor="middle">1</text><text class="tick" x="263.6" y="310" text-anchor="middle">10</text><text class="tick" x="398" y="310" text-anchor="middle">50</text><text class="tick" x="532.4000000000001" y="310" text-anchor="middle">100</text><text class="tick" x="666.8000000000001" y="310" text-anchor="middle">200</text><text class="axis-title" x="398" y="332" text-anchor="middle">Usuarios concurrentes</text><rect class="hit" x="62" y="28" width="134.4" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 1&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Verificar cadena (con SHA-256)&lt;b&gt;0,33 ms&lt;/b&gt;&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-2)&quot;&gt;&lt;/span&gt;Leer cadena (sin recalcular)&lt;b&gt;0,22 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="196.4" y="28" width="134.4" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 10&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Verificar cadena (con SHA-256)&lt;b&gt;3,32 ms&lt;/b&gt;&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-2)&quot;&gt;&lt;/span&gt;Leer cadena (sin recalcular)&lt;b&gt;2,38 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="330.8" y="28" width="134.4" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 50&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Verificar cadena (con SHA-256)&lt;b&gt;20,06 ms&lt;/b&gt;&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-2)&quot;&gt;&lt;/span&gt;Leer cadena (sin recalcular)&lt;b&gt;15,46 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="465.20000000000005" y="28" width="134.4" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 100&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Verificar cadena (con SHA-256)&lt;b&gt;40,67 ms&lt;/b&gt;&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-2)&quot;&gt;&lt;/span&gt;Leer cadena (sin recalcular)&lt;b&gt;31,75 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="599.6" y="28" width="134.4" height="260" data-tip="&lt;span class='tt-title'&gt;Usuarios concurrentes: 200&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Verificar cadena (con SHA-256)&lt;b&gt;83,28 ms&lt;/b&gt;&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-2)&quot;&gt;&lt;/span&gt;Leer cadena (sin recalcular)&lt;b&gt;63,81 ms&lt;/b&gt;&lt;/span&gt;"/></svg>
+    <div class="tooltip" hidden></div>
+  </div>
+</figure>
+</section>
+
+<section>
+  <h2>3 · Escalabilidad frente al crecimiento de la cadena</h2>
+  <p class="lead">Una cadena de bloques sólo crece: nunca se borra un bloque. Por eso se midió cómo evoluciona la
+  verificación completa a medida que la cadena se alarga, sellando actas hasta llegar a 400 bloques.</p>
+  
+<figure class="card" id="g-escalabilidad">
+  <figcaption>
+    <h3>Escalabilidad: latencia de verificación según el tamaño de la cadena</h3>
+    <p>Medición secuencial (1 usuario, 30 muestras por tamaño). El costo sube con el tamaño de la cadena, pero con 400 bloques sigue por debajo de 25 ms.</p>
+  </figcaption>
+  
+  <div class="chart-wrap">
+    <svg viewBox="0 0 760 340" role="img" aria-label="Escalabilidad: latencia de verificación según el tamaño de la cadena"><line class="grid" x1="62" y1="288" x2="734" y2="288"/><text class="tick" x="52" y="292" text-anchor="end">0</text><line class="grid" x1="62" y1="236" x2="734" y2="236"/><text class="tick" x="52" y="240" text-anchor="end">5</text><line class="grid" x1="62" y1="184" x2="734" y2="184"/><text class="tick" x="52" y="188" text-anchor="end">10</text><line class="grid" x1="62" y1="132" x2="734" y2="132"/><text class="tick" x="52" y="136" text-anchor="end">15</text><line class="grid" x1="62" y1="80" x2="734" y2="80"/><text class="tick" x="52" y="84" text-anchor="end">20</text><line class="grid" x1="62" y1="28" x2="734" y2="28"/><text class="tick" x="52" y="32" text-anchor="end">25</text><line class="axis" x1="62" y1="288" x2="734" y2="288"/><text class="axis-title" transform="translate(16,158) rotate(-90)" text-anchor="middle">Latencia promedio (ms)</text><polyline class="linea" points="62,264.213744 91.14285714285714,265.3340666666667 134,258.4946453333333 219.71428571428572,241.84722666666667 391.1428571428571,122.96555466666672 734,61.44851466666671" stroke="var(--serie-1)"/><circle class="punto" cx="62" cy="264.213744" r="4.5" fill="var(--serie-1)"/><circle class="punto" cx="91.14285714285714" cy="265.3340666666667" r="4.5" fill="var(--serie-1)"/><circle class="punto" cx="134" cy="258.4946453333333" r="4.5" fill="var(--serie-1)"/><circle class="punto" cx="219.71428571428572" cy="241.84722666666667" r="4.5" fill="var(--serie-1)"/><circle class="punto" cx="391.1428571428571" cy="122.96555466666672" r="4.5" fill="var(--serie-1)"/><circle class="punto" cx="734" cy="61.44851466666671" r="4.5" fill="var(--serie-1)"/><text class="val" x="728" y="49.44851466666671" text-anchor="end">21,78</text><text class="tick" x="62" y="310" text-anchor="middle">8</text><text class="tick" x="91.14285714285714" y="310" text-anchor="middle">25</text><text class="tick" x="134" y="310" text-anchor="middle">50</text><text class="tick" x="219.71428571428572" y="310" text-anchor="middle">100</text><text class="tick" x="391.1428571428571" y="310" text-anchor="middle">200</text><text class="tick" x="734" y="310" text-anchor="middle">400</text><text class="axis-title" x="398" y="332" text-anchor="middle">Bloques en la cadena</text><rect class="hit" x="62" y="28" width="14.57142857142857" height="260" data-tip="&lt;span class='tt-title'&gt;Bloques en la cadena: 8&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Latencia promedio&lt;b&gt;2,29 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="76.57142857142857" y="28" width="36" height="260" data-tip="&lt;span class='tt-title'&gt;Bloques en la cadena: 25&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Latencia promedio&lt;b&gt;2,18 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="112.57142857142857" y="28" width="64.28571428571429" height="260" data-tip="&lt;span class='tt-title'&gt;Bloques en la cadena: 50&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Latencia promedio&lt;b&gt;2,84 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="176.85714285714286" y="28" width="128.57142857142858" height="260" data-tip="&lt;span class='tt-title'&gt;Bloques en la cadena: 100&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Latencia promedio&lt;b&gt;4,44 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="305.42857142857144" y="28" width="257.1428571428571" height="260" data-tip="&lt;span class='tt-title'&gt;Bloques en la cadena: 200&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Latencia promedio&lt;b&gt;15,87 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="562.5714285714286" y="28" width="171.42857142857144" height="260" data-tip="&lt;span class='tt-title'&gt;Bloques en la cadena: 400&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Latencia promedio&lt;b&gt;21,78 ms&lt;/b&gt;&lt;/span&gt;"/></svg>
+    <div class="tooltip" hidden></div>
+  </div>
+</figure>
+</section>
+
+<section>
+  <h2>4 · Latencia del sellado de un bloque nuevo</h2>
+  <p class="lead">Es la operación de escritura del sistema: se arma el acta, se calcula su hash, se encadena al bloque
+  anterior y se escribe en MySQL. Se limitó a 100 publicaciones por nivel porque cada petición crea un bloque real.</p>
+  
+<figure class="card" id="g-sellado">
+  <figcaption>
+    <h3>Latencia del sellado de un bloque nuevo</h3>
+    <p>POST /api/actas/publicar — construye el acta, calcula su hash, lo encadena al bloque anterior y lo escribe en MySQL.</p>
+  </figcaption>
+  <div class="legend"><span class="legend-item"><span class="swatch" style="background:var(--serie-1)"></span>Latencia promedio</span><span class="legend-item"><span class="swatch" style="background:var(--serie-2)"></span>Latencia p99 (peor caso)</span></div>
+  <div class="chart-wrap">
+    <svg viewBox="0 0 760 340" role="img" aria-label="Latencia del sellado de un bloque nuevo"><line class="grid" x1="62" y1="288" x2="734" y2="288"/><text class="tick" x="52" y="292" text-anchor="end">0</text><line class="grid" x1="62" y1="201.33333333333334" x2="734" y2="201.33333333333334"/><text class="tick" x="52" y="205.33333333333334" text-anchor="end">10</text><line class="grid" x1="62" y1="114.66666666666669" x2="734" y2="114.66666666666669"/><text class="tick" x="52" y="118.66666666666669" text-anchor="end">20</text><line class="grid" x1="62" y1="28" x2="734" y2="28"/><text class="tick" x="52" y="32" text-anchor="end">30</text><line class="axis" x1="62" y1="288" x2="734" y2="288"/><text class="axis-title" transform="translate(16,158) rotate(-90)" text-anchor="middle">Milisegundos (ms)</text><path d="M149,288 L149,226.39333333333332 Q149,222.39333333333332 153,222.39333333333332 L169,222.39333333333332 Q173,222.39333333333332 173,226.39333333333332 L173,288 Z" fill="var(--serie-1)"/><path d="M175,288 L175,188 Q175,184 179,184 L195,184 Q199,184 199,188 L199,288 Z" fill="var(--serie-2)"/><path d="M373,288 L373,183.32 Q373,179.32 377,179.32 L393,179.32 Q397,179.32 397,183.32 L397,288 Z" fill="var(--serie-1)"/><path d="M399,288 L399,144.66666666666666 Q399,140.66666666666666 403,140.66666666666666 L419,140.66666666666666 Q423,140.66666666666666 423,144.66666666666666 L423,288 Z" fill="var(--serie-2)"/><path d="M597,288 L597,117.10666666666668 Q597,113.10666666666668 601,113.10666666666668 L617,113.10666666666668 Q621,113.10666666666668 621,117.10666666666668 L621,288 Z" fill="var(--serie-1)"/><path d="M623,288 L623,66.66666666666666 Q623,62.66666666666666 627,62.66666666666666 L643,62.66666666666666 Q647,62.66666666666666 647,66.66666666666666 L647,288 Z" fill="var(--serie-2)"/><text class="tick" x="174" y="310" text-anchor="middle">1</text><text class="tick" x="398" y="310" text-anchor="middle">5</text><text class="tick" x="622" y="310" text-anchor="middle">10</text><text class="axis-title" x="398" y="332" text-anchor="middle">Publicaciones simultáneas</text><rect class="hit" x="62" y="28" width="224" height="260" data-tip="&lt;span class='tt-title'&gt;Publicaciones simultáneas: 1&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Latencia promedio&lt;b&gt;7,57 ms&lt;/b&gt;&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-2)&quot;&gt;&lt;/span&gt;Latencia p99 (peor caso)&lt;b&gt;12,00 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="286" y="28" width="224" height="260" data-tip="&lt;span class='tt-title'&gt;Publicaciones simultáneas: 5&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Latencia promedio&lt;b&gt;12,54 ms&lt;/b&gt;&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-2)&quot;&gt;&lt;/span&gt;Latencia p99 (peor caso)&lt;b&gt;17,00 ms&lt;/b&gt;&lt;/span&gt;"/><rect class="hit" x="510" y="28" width="224" height="260" data-tip="&lt;span class='tt-title'&gt;Publicaciones simultáneas: 10&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-1)&quot;&gt;&lt;/span&gt;Latencia promedio&lt;b&gt;20,18 ms&lt;/b&gt;&lt;/span&gt;&lt;span class=&quot;tt-row&quot;&gt;&lt;span class=&quot;swatch&quot; style=&quot;background:var(--serie-2)&quot;&gt;&lt;/span&gt;Latencia p99 (peor caso)&lt;b&gt;26,00 ms&lt;/b&gt;&lt;/span&gt;"/></svg>
+    <div class="tooltip" hidden></div>
+  </div>
+</figure>
+</section>
+
+<section>
+  <h2>5 · Cumplimiento de los requisitos de rendimiento</h2>
+  <p class="lead">Contraste de las latencias medidas (siempre en su peor caso, percentil 99) con los tiempos máximos
+  comprometidos en el documento de grado.</p>
+  
+  <div class="req">
+    <div class="req-head">
+      <span class="req-name">Sellado de un acta en la cadena — máximo 5 segundos</span>
+      <span class="badge ok">✓ CUMPLE</span>
+    </div>
+    <div class="meter"><span style="width:0.6%"></span></div>
+    <div class="req-foot">
+      <span><b>26,00 ms</b> medido (peor caso p99)</span>
+      <span>límite exigido: 5.000 ms</span>
+      <span class="holgura">192× por debajo del límite</span>
+    </div>
+  </div>
+  
+  <div class="req">
+    <div class="req-head">
+      <span class="req-name">Consulta y verificación de la cadena — máximo 2 segundos</span>
+      <span class="badge ok">✓ CUMPLE</span>
+    </div>
+    <div class="meter"><span style="width:5.1499999999999995%"></span></div>
+    <div class="req-foot">
+      <span><b>103,00 ms</b> medido (peor caso p99)</span>
+      <span>límite exigido: 2.000 ms</span>
+      <span class="holgura">19× por debajo del límite</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>6 · Hallazgo: la escritura de bloques debe ser secuencial</h2>
+  <div class="callout">
+    <h4>Qué se observó</h4>
+    <p>Al bombardear <code>POST /api/actas/publicar</code> con publicaciones simultáneas, el nodo respondió sin errores
+    (0 fallos), pero la cadena terminó con
+    <b>160 índices duplicados</b> sobre 700 bloques y la verificación la reportó como
+    <b>inválida</b> (primer error en el bloque #500: ENLACE_ROTO).</p>
+    <p>La causa es que el sellado lee el último bloque y luego inserta el nuevo en dos pasos separados: si dos
+    publicaciones ocurren en el mismo instante, ambas leen el mismo bloque previo y se ramifican.</p>
+    <h4>Por qué no afecta al uso real</h4>
+    <p>La publicación de actas es un acto administrativo: la ejecuta únicamente el administrador, de a una y de forma
+    deliberada. El escenario concurrente no se da en el flujo normal del sistema. Aun así, el hallazgo documenta la
+    necesidad de <b>serializar el sellado</b> (una transacción con bloqueo, o una cola de publicación) si en el futuro
+    se habilitaran publicaciones simultáneas.</p>
+    <p>Es también una prueba a favor del diseño: la verificación por hashes <b>detecta</b> la anomalía en lugar de ocultarla.
+    Terminada la prueba, la base se restauró desde el respaldo previo y ambas cadenas — actas y bitácora de auditoría — volvieron a
+    verificarse como íntegras.</p>
+  </div>
+</section>
+
+<section>
+  <h2>7 · Tablas de resultados</h2>
+  <p class="lead">Valores completos de cada corrida, equivalentes a la salida de autocannon.</p>
+  
+<h3 class="tbl-title">Verificación de la cadena — GET /api/blockchain/verificar (20 s por nivel)</h3>
+<div class="tbl-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>Usuarios concurrentes</th><th>Latencia prom. (ms)</th><th>p50 (ms)</th><th>p90 (ms)</th>
+      <th>p99 (ms)</th><th>Máx. (ms)</th><th>Pet./seg</th><th>Peticiones</th><th>Errores</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td><td>0,33</td><td>0,00</td><td>1,00</td>
+      <td>2,00</td><td>4,00</td><td>992</td>
+      <td>19.842</td><td>0</td>
+    </tr><tr>
+      <td>10</td><td>3,32</td><td>3,00</td><td>4,00</td>
+      <td>7,00</td><td>24,00</td><td>2.629</td>
+      <td>52.570</td><td>0</td>
+    </tr><tr>
+      <td>25</td><td>10,05</td><td>9,00</td><td>12,00</td>
+      <td>17,00</td><td>39,00</td><td>2.371</td>
+      <td>47.419</td><td>0</td>
+    </tr><tr>
+      <td>50</td><td>20,06</td><td>19,00</td><td>24,00</td>
+      <td>27,00</td><td>47,00</td><td>2.433</td>
+      <td>48.639</td><td>0</td>
+    </tr><tr>
+      <td>100</td><td>40,67</td><td>40,00</td><td>45,00</td>
+      <td>52,00</td><td>66,00</td><td>2.427</td>
+      <td>48.537</td><td>0</td>
+    </tr><tr>
+      <td>200</td><td>83,28</td><td>83,00</td><td>89,00</td>
+      <td>103,00</td><td>124,00</td><td>2.383</td>
+      <td>47.661</td><td>0</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+  
+<h3 class="tbl-title">Lectura de la cadena — GET /api/blockchain (10 s por nivel)</h3>
+<div class="tbl-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>Usuarios concurrentes</th><th>Latencia prom. (ms)</th><th>p50 (ms)</th><th>p90 (ms)</th>
+      <th>p99 (ms)</th><th>Máx. (ms)</th><th>Pet./seg</th><th>Peticiones</th><th>Errores</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td><td>0,22</td><td>0,00</td><td>1,00</td>
+      <td>1,00</td><td>4,00</td><td>1.174</td>
+      <td>11.741</td><td>0</td>
+    </tr><tr>
+      <td>10</td><td>2,38</td><td>2,00</td><td>3,00</td>
+      <td>6,00</td><td>12,00</td><td>3.421</td>
+      <td>34.204</td><td>0</td>
+    </tr><tr>
+      <td>50</td><td>15,46</td><td>15,00</td><td>19,00</td>
+      <td>23,00</td><td>36,00</td><td>3.132</td>
+      <td>31.318</td><td>0</td>
+    </tr><tr>
+      <td>100</td><td>31,75</td><td>31,00</td><td>36,00</td>
+      <td>51,00</td><td>68,00</td><td>3.098</td>
+      <td>30.972</td><td>0</td>
+    </tr><tr>
+      <td>200</td><td>63,81</td><td>63,00</td><td>69,00</td>
+      <td>83,00</td><td>100,00</td><td>3.101</td>
+      <td>31.008</td><td>0</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+  
+<h3 class="tbl-title">Sellado de bloques — POST /api/actas/publicar (100 publicaciones por nivel)</h3>
+<div class="tbl-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>Usuarios concurrentes</th><th>Latencia prom. (ms)</th><th>p50 (ms)</th><th>p90 (ms)</th>
+      <th>p99 (ms)</th><th>Máx. (ms)</th><th>Pet./seg</th><th>Peticiones</th><th>Errores</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td><td>7,57</td><td>7,00</td><td>9,00</td>
+      <td>12,00</td><td>16,00</td><td>100</td>
+      <td>100</td><td>0</td>
+    </tr><tr>
+      <td>5</td><td>12,54</td><td>12,00</td><td>16,00</td>
+      <td>17,00</td><td>17,00</td><td>100</td>
+      <td>100</td><td>0</td>
+    </tr><tr>
+      <td>10</td><td>20,18</td><td>20,00</td><td>24,00</td>
+      <td>26,00</td><td>26,00</td><td>100</td>
+      <td>100</td><td>0</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+  
+<h3 class="tbl-title">Escalabilidad — verificación completa según el tamaño de la cadena</h3>
+<div class="tbl-wrap">
+<table>
+  <thead><tr><th>Bloques en la cadena</th><th>Latencia prom. (ms)</th><th>p50 (ms)</th><th>p99 (ms)</th><th>Máx. (ms)</th></tr></thead>
+  <tbody>
+    <tr><td>8</td><td>2,29</td><td>1,80</td><td>15,45</td><td>15,45</td></tr><tr><td>25</td><td>2,18</td><td>2,07</td><td>3,04</td><td>3,04</td></tr><tr><td>50</td><td>2,84</td><td>2,73</td><td>4,97</td><td>4,97</td></tr><tr><td>100</td><td>4,44</td><td>4,20</td><td>6,43</td><td>6,43</td></tr><tr><td>200</td><td>15,87</td><td>17,19</td><td>22,08</td><td>22,08</td></tr><tr><td>400</td><td>21,78</td><td>16,22</td><td>50,02</td><td>50,02</td></tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+<section>
+  <h2>8 · Metodología</h2>
+  <ul>
+    <li><b>Herramienta:</b> autocannon, ejecutado desde un script de Node que encadena todos los niveles y guarda las métricas en JSON.</li>
+    <li><b>Calentamiento:</b> 5 segundos de carga previa descartados, para no medir el arranque en frío del servidor ni del pool de MySQL.</li>
+    <li><b>Niveles de carga:</b> 1, 10, 25, 50, 100 y 200 conexiones simultáneas, con 3 segundos de reposo entre corridas.</li>
+    <li><b>Métricas registradas:</b> latencia promedio, percentiles 50/90/99, latencia máxima, peticiones por segundo, total de peticiones, errores, tiempos de espera agotados y respuestas fuera de 2xx.</li>
+    <li><b>Escenario:</b> cliente y servidor en el mismo equipo (localhost), por lo que las cifras excluyen la latencia de red y reflejan el costo de cómputo del nodo.</li>
+    <li><b>Estado final:</b> antes de las pruebas de escritura se respaldaron las tablas <code>bloques</code> y <code>auditoria</code>; al terminar la campaña la base se restauró a ese estado exacto y ambas cadenas de hashes se verificaron íntegras.</li>
+  </ul>
+</section>
+
+<footer>
+  Informe generado automáticamente a partir de <code>resultados.json</code> · Sistema web con tecnología blockchain
+  para la gestión segura de calificaciones y evaluación docente · Escuela de Comando y Estado Mayor del Ejército.
+</footer>
+</div>
+
+<script>
+  // Capa de interacción: tooltip sobre las bandas del eje X de cada gráfico.
+  document.querySelectorAll('.chart-wrap').forEach((wrap) => {
+    const tip = wrap.querySelector('.tooltip');
+    wrap.querySelectorAll('.hit').forEach((hit) => {
+      const mostrar = (ev) => {
+        tip.innerHTML = hit.dataset.tip;
+        tip.hidden = false;
+        const r = wrap.getBoundingClientRect();
+        const b = hit.getBoundingClientRect();
+        let x = b.left - r.left + b.width / 2 - tip.offsetWidth / 2;
+        x = Math.max(4, Math.min(x, r.width - tip.offsetWidth - 4));
+        tip.style.left = x + 'px';
+        tip.style.top = Math.max(4, (ev.clientY ? ev.clientY - r.top - tip.offsetHeight - 14 : 8)) + 'px';
+      };
+      hit.addEventListener('mousemove', mostrar);
+      hit.addEventListener('mouseenter', mostrar);
+      hit.addEventListener('mouseleave', () => { tip.hidden = true; });
+    });
+  });
+</script>
