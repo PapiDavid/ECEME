@@ -104,7 +104,7 @@ const HomePage = () => {
                 </span>
               </div>
               <h1 className="text-background text-4xl md:text-6xl font-black tracking-tighter mb-6 uppercase">
-                ESCUELA DE COMANDO Y ESTADO MAYOR
+                ESCUELA DE COMANDO Y ESTADO MAYOR DEL EJERCITO
               </h1>
               <p className="text-sm md:text-base text-background/70 max-w-3xl mx-auto font-bold tracking-[0.2em] leading-relaxed uppercase">
                 Formación estratégica para la seguridad y defensa del territorio nacional.

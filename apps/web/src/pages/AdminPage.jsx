@@ -5,7 +5,8 @@ import { motion } from 'framer-motion';
 import { ShieldAlert, Users, BookOpen, Settings, FileDown, RefreshCw, Plus, Trash2, Edit3, Save, X, GraduationCap, BookMarked, Search, ChevronLeft, ChevronRight, KeyRound, ScrollText } from 'lucide-react';
 import Header from '@/components/Header.jsx';
 import Footer from '@/components/Footer.jsx';
-import api from '@/lib/api'; 
+import api from '@/lib/api';
+import { validarPersona, validarNombreMateria } from '@/lib/validaciones';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -26,6 +27,8 @@ const AdminPage = () => {
   const [docentes, setDocentes] = useState([]);
   const [asignaciones, setAsignaciones] = useState([]);
   const [materiaToDelete, setMateriaToDelete] = useState('');
+  // Catálogo oficial de grados (viene del backend: una sola lista para todos)
+  const [grados, setGrados] = useState([]);
 
   // Estados de formularios (el código se genera automáticamente en el backend)
   const [alumnoForm, setAlumnoForm] = useState({ nombre: '', ci: '', grado: '', ciclo: 'PRIMER CICLO', asignacion_id: '', materia_id: '', docente_id: '' });
@@ -35,6 +38,16 @@ const AdminPage = () => {
   // Docentes que ya dictan una materia (según su lista de materia_ids)
   const docentesDeMateria = (materiaId) => docentes.filter(d =>
     d.materia_ids && String(d.materia_ids).split(',').map(Number).includes(Number(materiaId)));
+  // Tope de docentes por materia (misma regla que aplica el backend)
+  const MAX_DOCENTES = 3;
+  const materiaLlena = (materiaId) => docentesDeMateria(materiaId).length >= MAX_DOCENTES;
+  // El docente no tiene ciclo propio: lo hereda de las materias que dicta.
+  // Si dicta en los dos, se muestran ambos.
+  const ciclosDeDocente = (docente) => {
+    const ids = String(docente.materia_ids || '').split(',').map(Number).filter(Boolean);
+    const ciclos = [...new Set(materias.filter(m => ids.includes(m.id)).map(m => m.ciclo))];
+    return ciclos.map(c => c === 'PRIMER CICLO' ? '1ER' : '2DO').join(' · ');
+  };
   const [materiaName, setMateriaName] = useState('');
   const [materiaCiclo, setMateriaCiclo] = useState('PRIMER CICLO');
   const [comandanteName, setComandanteName] = useState('');
@@ -60,16 +73,18 @@ const AdminPage = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [matRes, critRes, confRes, notasRes, estRes, docRes, asigRes] = await Promise.all([
+      const [matRes, critRes, confRes, notasRes, estRes, docRes, asigRes, catRes] = await Promise.all([
         api.get('/materias'),
         api.get('/criterios'),
         api.get('/configuracion'),
         api.get('/notas/consolidado'),
         api.get('/admin/estudiantes'),
         api.get('/admin/docentes'),
-        api.get('/asignaciones')
+        api.get('/asignaciones'),
+        api.get('/catalogos')
       ]);
 
+      setGrados(catRes.data.grados || []);
       setMaterias(matRes.data);
       setCriterios(critRes.data);
       if (confRes.data) { setConfig(confRes.data); setComandanteName(confRes.data.comandante_nombre || ''); }
@@ -110,7 +125,11 @@ const AdminPage = () => {
     setEditForm({ ...user, type, materia_id: user.materia_id?.toString() || "", materia_ids: materiaIds });
   };
 
+  // La edición exige exactamente lo mismo que el alta (nombre y grado válidos);
+  // el servidor vuelve a validar, así que no se puede saltar desde el navegador.
   const handleUpdateUser = async () => {
+    const error = validarPersona(editForm, grados);
+    if (error) return toast.error(error);
     try {
       const endpoint = editForm.type === 'estudiante' ? `/admin/estudiantes/${editingId}` : `/admin/docentes/${editingId}`;
       await api.put(endpoint, editForm);
@@ -118,19 +137,20 @@ const AdminPage = () => {
       setEditingId(null);
       fetchData();
     } catch (err) {
-      toast.error('ERROR AL ACTUALIZAR');
+      toast.error(mensajeError(err, 'ERROR AL ACTUALIZAR'));
     }
   };
 
-  const handleDeleteUser = async (id, type) => {
-    if (!window.confirm('¿ESTÁ SEGURO DE ELIMINAR ESTE REGISTRO?')) return;
+  const handleDeleteUser = async (user) => {
+    const quien = `${user.codigo} — ${user.grado || ''} ${user.nombre}`.trim();
+    if (!window.confirm(`¿ELIMINAR DEFINITIVAMENTE A ${quien}?\n\nSE BORRARÁ SU USUARIO Y NO SE PUEDE DESHACER.`)) return;
     try {
-      const endpoint = type === 'estudiante' ? `/admin/estudiantes/${id}` : `/admin/docentes/${id}`;
+      const endpoint = user.type === 'estudiante' ? `/admin/estudiantes/${user.id}` : `/admin/docentes/${user.id}`;
       await api.delete(endpoint);
       toast.success('REGISTRO ELIMINADO');
       fetchData();
     } catch (err) {
-      toast.error('ERROR AL ELIMINAR');
+      toast.error(mensajeError(err, 'ERROR AL ELIMINAR'));
     }
   };
 
@@ -146,30 +166,36 @@ const AdminPage = () => {
     }
   };
 
-  const ciValido = (ci) => /^\d{6,9}$/.test(ci);
+  // Mensaje del servidor (ej. "Ya existe un registro con ese CI: DOC-012")
+  // en vez de un "ERROR" genérico que no dice qué corregir.
+  const mensajeError = (err, porDefecto) =>
+    err.response?.data?.message?.toUpperCase?.() || porDefecto;
 
   const handleAddAlumno = async e => {
     e.preventDefault();
-    if (!ciValido(alumnoForm.ci)) return toast.error('EL CI DEBE TENER ENTRE 6 Y 9 DÍGITOS');
+    const error = validarPersona(alumnoForm, grados, { conCI: true });
+    if (error) return toast.error(error);
     if (!alumnoForm.materia_id) return toast.error('SELECCIONE UNA MATERIA');
     try {
       const res = await api.post('/admin/estudiantes', { ...alumnoForm, password: "ECEME2026" });
       toast.success(`CURSANTE REGISTRADO: ${res.data.codigo}`);
       setAlumnoForm({ nombre: '', ci: '', grado: '', ciclo: 'PRIMER CICLO', asignacion_id: '', materia_id: '', docente_id: '' });
       fetchData();
-    } catch (err) { toast.error('ERROR AL REGISTRAR'); }
+    } catch (err) { toast.error(mensajeError(err, 'ERROR AL REGISTRAR')); }
   };
 
   const handleAddDocente = async e => {
     e.preventDefault();
-    if (!ciValido(docenteForm.ci)) return toast.error('EL CI DEBE TENER ENTRE 6 Y 9 DÍGITOS');
+    const error = validarPersona(docenteForm, grados, { conCI: true });
+    if (error) return toast.error(error);
     if (!docenteForm.materia_id) return toast.error('SELECCIONE UNA MATERIA');
+    if (materiaLlena(docenteForm.materia_id)) return toast.error(`ESA MATERIA YA TIENE EL MÁXIMO DE ${MAX_DOCENTES} DOCENTES`);
     try {
       const res = await api.post('/admin/docentes', { ...docenteForm, password: "ECEME2026" });
       toast.success(`DOCENTE REGISTRADO: ${res.data.codigo}`);
       setDocenteForm({ nombre: '', ci: '', grado: '', materia_id: '' });
       fetchData();
-    } catch (err) { toast.error(err.response?.data?.message || 'ERROR AL REGISTRAR'); }
+    } catch (err) { toast.error(mensajeError(err, 'ERROR AL REGISTRAR')); }
   };
 
   const handleDeleteMateria = async (id) => {
@@ -190,13 +216,18 @@ const AdminPage = () => {
   };
 
   const handleAddMateria = async () => {
-    if (!materiaName) return;
+    const error = validarNombreMateria(materiaName);
+    if (error) return toast.error(error);
+    // Aviso inmediato del duplicado (el servidor lo rechaza igual)
+    const yaExiste = materias.some(m =>
+      m.nombre === materiaName.trim().replace(/\s+/g, ' ').toUpperCase() && m.ciclo === materiaCiclo);
+    if (yaExiste) return toast.error(`LA MATERIA YA EXISTE EN EL ${materiaCiclo}`);
     try {
       await api.post('/admin/materias', { nombre: materiaName, ciclo: materiaCiclo });
       toast.success('MATERIA CREADA');
       setMateriaName('');
       fetchData();
-    } catch (err) { toast.error('ERROR'); }
+    } catch (err) { toast.error(mensajeError(err, 'ERROR AL CREAR LA MATERIA')); }
   };
 
   // --- Directorio: filtrado por pestaña + buscador + paginación (10 por página) ---
@@ -560,9 +591,16 @@ const AdminPage = () => {
                 <div className="absolute top-0 left-0 w-full h-1 bg-secondary"></div>
                 <h3 className="font-black mb-6 uppercase text-xs tracking-widest text-muted-foreground">Registro de Cursante</h3>
                 <form onSubmit={handleAddAlumno} className="space-y-4">
-                  <Input placeholder="NOMBRE COMPLETO" value={alumnoForm.nombre} onChange={e => setAlumnoForm({...alumnoForm, nombre: e.target.value})} className="font-bold uppercase" required />
+                  <Input placeholder="NOMBRE COMPLETO (SIN EL GRADO)" value={alumnoForm.nombre} onChange={e => setAlumnoForm({...alumnoForm, nombre: e.target.value})} maxLength={80} className="font-bold uppercase" required />
                   <Input placeholder="CARNET DE IDENTIDAD (CI)" inputMode="numeric" value={alumnoForm.ci} onChange={e => setAlumnoForm({...alumnoForm, ci: e.target.value.replace(/\D/g, '')})} maxLength={9} className="font-bold" required />
-                  <Input placeholder="GRADO" value={alumnoForm.grado} onChange={e => setAlumnoForm({...alumnoForm, grado: e.target.value})} className="font-bold uppercase" required />
+
+                  {/* El grado es un conjunto cerrado: se elige de la lista oficial */}
+                  <Select value={alumnoForm.grado} onValueChange={v => setAlumnoForm({...alumnoForm, grado: v})}>
+                    <SelectTrigger className="font-bold"><SelectValue placeholder="GRADO" /></SelectTrigger>
+                    <SelectContent>
+                      {grados.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
 
                   <Select value={alumnoForm.ciclo} onValueChange={v => setAlumnoForm({...alumnoForm, ciclo: v, asignacion_id: '', materia_id: '', docente_id: ''})}>
                     <SelectTrigger className="font-bold"><SelectValue placeholder="CICLO" /></SelectTrigger>
@@ -603,19 +641,32 @@ const AdminPage = () => {
                 <div className="absolute top-0 left-0 w-full h-1 bg-accent"></div>
                 <h3 className="font-black mb-6 uppercase text-xs tracking-widest text-muted-foreground">Registro de Docente</h3>
                 <form onSubmit={handleAddDocente} className="space-y-4">
-                  <Input placeholder="NOMBRE COMPLETO" value={docenteForm.nombre} onChange={e => setDocenteForm({...docenteForm, nombre: e.target.value})} className="font-bold uppercase" required />
+                  <Input placeholder="NOMBRE COMPLETO (SIN EL GRADO)" value={docenteForm.nombre} onChange={e => setDocenteForm({...docenteForm, nombre: e.target.value})} maxLength={80} className="font-bold uppercase" required />
                   <Input placeholder="CARNET DE IDENTIDAD (CI)" inputMode="numeric" value={docenteForm.ci} onChange={e => setDocenteForm({...docenteForm, ci: e.target.value.replace(/\D/g, '')})} maxLength={9} className="font-bold" required />
-                  <Input placeholder="GRADO" value={docenteForm.grado} onChange={e => setDocenteForm({...docenteForm, grado: e.target.value})} className="font-bold uppercase" required />
+
+                  {/* El grado es un conjunto cerrado: se elige de la lista oficial */}
+                  <Select value={docenteForm.grado} onValueChange={v => setDocenteForm({...docenteForm, grado: v})}>
+                    <SelectTrigger className="font-bold"><SelectValue placeholder="GRADO" /></SelectTrigger>
+                    <SelectContent>
+                      {grados.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
 
                   <div className="space-y-1">
                     <Select value={docenteForm.materia_id} onValueChange={v => setDocenteForm({...docenteForm, materia_id: v})}>
                       <SelectTrigger className="font-bold border-primary/40"><SelectValue placeholder="ASIGNAR MATERIA" /></SelectTrigger>
                       <SelectContent>
-                        {materias.map(m => (
-                          <SelectItem key={m.id} value={m.id.toString()}>
-                            {m.nombre} · {m.ciclo === 'PRIMER CICLO' ? '1ER' : '2DO'}
-                          </SelectItem>
-                        ))}
+                        {/* Las materias que ya llegaron a 3 docentes salen en gris y
+                            no se pueden elegir: el aviso llega ANTES de llenar el formulario */}
+                        {materias.map(m => {
+                          const llena = materiaLlena(m.id);
+                          return (
+                            <SelectItem key={m.id} value={m.id.toString()} disabled={llena}>
+                              {m.nombre} · {m.ciclo === 'PRIMER CICLO' ? '1ER' : '2DO'}
+                              {llena && <span className="text-[9px] font-black text-destructive"> · COMPLETA (3/3)</span>}
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                     {docenteForm.materia_id && (
@@ -652,7 +703,7 @@ const AdminPage = () => {
                       </SelectContent>
                     </Select>
                     <div className="flex space-x-2">
-                      <Input value={materiaName} onChange={e => setMateriaName(e.target.value)} className="font-bold" placeholder="NOMBRE..." />
+                      <Input value={materiaName} onChange={e => setMateriaName(e.target.value)} maxLength={60} className="font-bold" placeholder="NOMBRE..." />
                       <Button onClick={handleAddMateria} className="bg-primary"><Plus/></Button>
                     </div>
 
@@ -733,8 +784,14 @@ const AdminPage = () => {
                         <td className="py-4">
                           {editingId === user.id ? (
                             <div className="flex space-x-2">
-                              <Input className="h-8 text-xs font-bold w-24" value={editForm.grado} onChange={e => setEditForm({...editForm, grado: e.target.value})} />
-                              <Input className="h-8 text-xs font-bold" value={editForm.nombre} onChange={e => setEditForm({...editForm, nombre: e.target.value})} />
+                              {/* Mismo desplegable de grados que en el alta */}
+                              <Select value={editForm.grado || ''} onValueChange={v => setEditForm({...editForm, grado: v})}>
+                                <SelectTrigger className="h-8 text-[10px] font-bold w-32 border-2"><SelectValue placeholder="GRADO" /></SelectTrigger>
+                                <SelectContent>
+                                  {grados.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                              <Input className="h-8 text-xs font-bold" value={editForm.nombre} onChange={e => setEditForm({...editForm, nombre: e.target.value})} maxLength={80} />
                             </div>
                           ) : (
                             <span className="font-bold uppercase text-xs">{user.grado} {user.nombre}</span>
@@ -742,7 +799,10 @@ const AdminPage = () => {
                         </td>
                         <td className="text-xs font-mono font-bold">{user.codigo}</td>
                         <td className="text-xs font-bold">{user.ci || '—'}</td>
-                        <td className="text-[10px] font-bold uppercase text-muted-foreground">{user.type === 'docente' ? '—' : (user.ciclo || '—')}</td>
+                        {/* El docente hereda el ciclo de las materias que dicta */}
+                        <td className="text-[10px] font-bold uppercase text-muted-foreground">
+                          {user.type === 'docente' ? (ciclosDeDocente(user) || '—') : (user.ciclo || '—')}
+                        </td>
                         <td>
                            {editingId === user.id ? (
                              editForm.type === 'docente' ? (
@@ -790,7 +850,7 @@ const AdminPage = () => {
                             <div className="flex justify-center space-x-4">
                               <button onClick={() => handleEditClick(user, user.type)} className="text-primary hover:scale-125 transition-transform"><Edit3 size={18}/></button>
                               <button onClick={() => handleResetPassword(user)} title="RESTABLECER CONTRASEÑA" className="text-amber-600 hover:scale-125 transition-transform"><KeyRound size={18}/></button>
-                              <button onClick={() => handleDeleteUser(user.id, user.type)} className="text-destructive hover:scale-125 transition-transform"><Trash2 size={18}/></button>
+                              <button onClick={() => handleDeleteUser(user)} title="ELIMINAR REGISTRO" className="text-destructive hover:scale-125 transition-transform"><Trash2 size={18}/></button>
                             </div>
                           )}
                         </td>

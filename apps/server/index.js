@@ -5,6 +5,10 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const { GENESIS_PREV, calcularHash } = require('./blockchain');
 const { GENESIS_AUDITORIA, calcularHashAuditoria } = require('./auditoria-hash');
+const {
+  GRADOS_MILITARES, CICLOS, limpiar,
+  validarPersona, validarNombre, validarGrado, validarNombreMateria, validarCiclo
+} = require('./validaciones');
 require('dotenv').config();
 
 const app = express();
@@ -172,6 +176,33 @@ function materiasSinCupo(materiaIds, excludeDocenteId, cb) {
   });
 }
 
+// El CI identifica a la persona, así que no puede repetirse NI ENTRE cursantes
+// y docentes (nadie es las dos cosas). Devuelve en el callback el código del
+// registro que ya usa ese CI, o null si está libre.
+// `excluir` = { tabla: 'estudiantes'|'docentes', id } para no chocar consigo
+// mismo al editar.
+function buscarCIDuplicado(ci, excluir, cb) {
+  const ex = excluir || {};
+  const sql = `
+    SELECT codigo FROM estudiantes WHERE ci = ? AND (? IS NULL OR id != ?)
+    UNION ALL
+    SELECT codigo FROM docentes    WHERE ci = ? AND (? IS NULL OR id != ?)
+    LIMIT 1`;
+  const idEst = ex.tabla === 'estudiantes' ? ex.id : null;
+  const idDoc = ex.tabla === 'docentes' ? ex.id : null;
+  db.query(sql, [ci, idEst, idEst, ci, idDoc, idDoc], (err, rows) => {
+    if (err) return cb(err);
+    cb(null, rows.length > 0 ? rows[0].codigo : null);
+  });
+}
+
+// Catálogos cerrados que consume el frontend (grados y ciclos). Así el
+// desplegable del formulario y la validación del servidor salen de la
+// MISMA lista y no se pueden desincronizar.
+app.get('/api/catalogos', (req, res) => {
+  res.json({ grados: GRADOS_MILITARES, ciclos: CICLOS });
+});
+
 // --- 1. AUTENTICACIÓN ---
 // Se busca SOLO por identificador y la clave se valida con bcrypt.
 // El mensaje de error es genérico a propósito: no revela si el usuario existe.
@@ -277,23 +308,34 @@ app.get('/api/admin/estudiantes', (req, res) => {
 // Registro Estudiante con materia_id integrado (código CUR-XXX generado automáticamente)
 app.post('/api/admin/estudiantes', (req, res) => {
   const { nombre, ci, grado, ciclo, password, materia_id, docente_id } = req.body;
-  const nombreU = (nombre || '').trim().toUpperCase();
-  const gradoU = (grado || '').trim().toUpperCase();
-  // Calculamos el siguiente correlativo en SQL (robusto a mayúsculas/formato)
-  db.query("SELECT IFNULL(MAX(CAST(SUBSTRING(codigo, 5) AS UNSIGNED)), 0) + 1 AS siguiente FROM estudiantes WHERE codigo LIKE 'CUR-%'", (errC, rowsC) => {
-    if (errC) return res.status(500).json(errC);
-    const codigo = 'CUR-' + String(rowsC[0].siguiente).padStart(3, '0');
+  const nombreU = limpiar(nombre);
+  const gradoU = limpiar(grado);
+  const ciL = String(ci == null ? '' : ci).trim();
 
-    db.query("INSERT INTO usuarios (identificador, password, rol, primer_login) VALUES (?, ?, 'alumno', 1)", [codigo, bcrypt.hashSync(password, SALT_ROUNDS)], (err, userRes) => {
-      if (err) return res.status(500).json(err);
+  // Reglas de negocio (las mismas que aplica el formulario, pero aquí mandan)
+  const error = validarPersona({ nombre, grado, ci, ciclo }, { conCI: true, conCiclo: true });
+  if (error) return res.status(400).json({ message: error });
 
-      const mid = materia_id && materia_id !== '' ? parseInt(materia_id) : null;
-      const did = docente_id && docente_id !== '' ? parseInt(docente_id) : null;
-      db.query("INSERT INTO estudiantes (usuario_id, nombre, codigo, ci, grado, ciclo, materia_id, docente_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      [userRes.insertId, nombreU, codigo, ci || null, gradoU, ciclo, mid, did], (err2) => {
-        if (err2) return res.status(500).json(err2);
-        registrarAuditoria(req, 'CREAR_CURSANTE', `Registró al cursante ${codigo} — ${nombreU}`);
-        res.json({ message: "Cursante registrado", codigo });
+  buscarCIDuplicado(ciL, null, (errCI, codigoExistente) => {
+    if (errCI) return res.status(500).json(errCI);
+    if (codigoExistente) return res.status(409).json({ message: `Ya existe un registro con ese CI: ${codigoExistente}` });
+
+    // Calculamos el siguiente correlativo en SQL (robusto a mayúsculas/formato)
+    db.query("SELECT IFNULL(MAX(CAST(SUBSTRING(codigo, 5) AS UNSIGNED)), 0) + 1 AS siguiente FROM estudiantes WHERE codigo LIKE 'CUR-%'", (errC, rowsC) => {
+      if (errC) return res.status(500).json(errC);
+      const codigo = 'CUR-' + String(rowsC[0].siguiente).padStart(3, '0');
+
+      db.query("INSERT INTO usuarios (identificador, password, rol, primer_login) VALUES (?, ?, 'alumno', 1)", [codigo, bcrypt.hashSync(password, SALT_ROUNDS)], (err, userRes) => {
+        if (err) return res.status(500).json(err);
+
+        const mid = materia_id && materia_id !== '' ? parseInt(materia_id) : null;
+        const did = docente_id && docente_id !== '' ? parseInt(docente_id) : null;
+        db.query("INSERT INTO estudiantes (usuario_id, nombre, codigo, ci, grado, ciclo, materia_id, docente_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [userRes.insertId, nombreU, codigo, ciL, gradoU, limpiar(ciclo), mid, did], (err2) => {
+          if (err2) return res.status(500).json(err2);
+          registrarAuditoria(req, 'CREAR_CURSANTE', `Registró al cursante ${codigo} — ${nombreU}`);
+          res.json({ message: "Cursante registrado", codigo });
+        });
       });
     });
   });
@@ -304,11 +346,16 @@ app.put('/api/admin/estudiantes/:id', (req, res) => {
   const { nombre, grado, ciclo, materia_id, docente_id } = req.body;
   const mid = materia_id && materia_id !== '' ? parseInt(materia_id) : null;
   const did = docente_id && docente_id !== '' ? parseInt(docente_id) : null;
-  const nombreU = (nombre || '').trim().toUpperCase();
-  const gradoU = (grado || '').trim().toUpperCase();
+  const nombreU = limpiar(nombre);
+  const gradoU = limpiar(grado);
+
+  // La edición exige lo MISMO que el alta (antes no validaba nada y se podía
+  // dejar el nombre vacío desde el lápiz del directorio).
+  const error = validarPersona({ nombre, grado, ciclo }, { conCiclo: true });
+  if (error) return res.status(400).json({ message: error });
 
   const sql = "UPDATE estudiantes SET nombre = ?, grado = ?, ciclo = ?, materia_id = ?, docente_id = ? WHERE id = ?";
-  db.query(sql, [nombreU, gradoU, ciclo, mid, did, req.params.id], (err) => {
+  db.query(sql, [nombreU, gradoU, limpiar(ciclo), mid, did, req.params.id], (err) => {
     if (err) return res.status(500).json(err);
     registrarAuditoria(req, 'EDITAR_CURSANTE', `Editó los datos del cursante ${nombreU}`);
     res.json({ message: "Estudiante actualizado correctamente" });
@@ -351,32 +398,41 @@ app.post('/api/admin/docentes', (req, res) => {
   const materiaIds = ((req.body.materia_ids && req.body.materia_ids.length)
     ? req.body.materia_ids
     : (req.body.materia_id ? [req.body.materia_id] : [])).map(Number).filter(Boolean);
-  const nombreU = (nombre || '').trim().toUpperCase();
-  const gradoU = (grado || '').trim().toUpperCase();
+  const nombreU = limpiar(nombre);
+  const gradoU = limpiar(grado);
+  const ciL = String(ci == null ? '' : ci).trim();
 
-  materiasSinCupo(materiaIds, null, (cupoErr, llenas) => {
-    if (cupoErr) return res.status(500).json(cupoErr);
-    if (llenas.length > 0) return res.status(400).json({ message: `Una materia ya tiene el máximo de ${MAX_DOCENTES_POR_MATERIA} docentes` });
+  const error = validarPersona({ nombre, grado, ci }, { conCI: true });
+  if (error) return res.status(400).json({ message: error });
 
-    // Calculamos el siguiente correlativo en SQL (robusto a mayúsculas/formato)
-    db.query("SELECT IFNULL(MAX(CAST(SUBSTRING(codigo, 5) AS UNSIGNED)), 0) + 1 AS siguiente FROM docentes WHERE codigo LIKE 'DOC-%'", (errC, rowsC) => {
-      if (errC) return res.status(500).json(errC);
-      const codigo = 'DOC-' + String(rowsC[0].siguiente).padStart(3, '0');
+  buscarCIDuplicado(ciL, null, (errCI, codigoExistente) => {
+    if (errCI) return res.status(500).json(errCI);
+    if (codigoExistente) return res.status(409).json({ message: `Ya existe un registro con ese CI: ${codigoExistente}` });
 
-      db.query("INSERT INTO usuarios (identificador, password, rol, primer_login) VALUES (?, ?, 'profe', 1)", [codigo, bcrypt.hashSync(password, SALT_ROUNDS)], (err, userRes) => {
-        if (err) return res.status(500).json(err);
+    materiasSinCupo(materiaIds, null, (cupoErr, llenas) => {
+      if (cupoErr) return res.status(500).json(cupoErr);
+      if (llenas.length > 0) return res.status(400).json({ message: `Una materia ya tiene el máximo de ${MAX_DOCENTES_POR_MATERIA} docentes` });
 
-        const primaryMateria = materiaIds.length > 0 ? materiaIds[0] : null;
-        db.query("INSERT INTO docentes (usuario_id, nombre, codigo, ci, grado, materia_id) VALUES (?, ?, ?, ?, ?, ?)",
-        [userRes.insertId, nombreU, codigo, ci || null, gradoU, primaryMateria], (err2, docRes) => {
-          if (err2) return res.status(500).json(err2);
-          registrarAuditoria(req, 'CREAR_DOCENTE', `Registró al docente ${codigo} — ${nombreU}`);
-          if (materiaIds.length === 0) return res.json({ message: "Docente registrado", codigo });
+      // Calculamos el siguiente correlativo en SQL (robusto a mayúsculas/formato)
+      db.query("SELECT IFNULL(MAX(CAST(SUBSTRING(codigo, 5) AS UNSIGNED)), 0) + 1 AS siguiente FROM docentes WHERE codigo LIKE 'DOC-%'", (errC, rowsC) => {
+        if (errC) return res.status(500).json(errC);
+        const codigo = 'DOC-' + String(rowsC[0].siguiente).padStart(3, '0');
 
-          const values = materiaIds.map(mid => [docRes.insertId, mid]);
-          db.query("INSERT INTO docente_materias (docente_id, materia_id) VALUES ?", [values], (err3) => {
-            if (err3) return res.status(500).json(err3);
-            res.json({ message: "Docente registrado", codigo });
+        db.query("INSERT INTO usuarios (identificador, password, rol, primer_login) VALUES (?, ?, 'profe', 1)", [codigo, bcrypt.hashSync(password, SALT_ROUNDS)], (err, userRes) => {
+          if (err) return res.status(500).json(err);
+
+          const primaryMateria = materiaIds.length > 0 ? materiaIds[0] : null;
+          db.query("INSERT INTO docentes (usuario_id, nombre, codigo, ci, grado, materia_id) VALUES (?, ?, ?, ?, ?, ?)",
+          [userRes.insertId, nombreU, codigo, ciL, gradoU, primaryMateria], (err2, docRes) => {
+            if (err2) return res.status(500).json(err2);
+            registrarAuditoria(req, 'CREAR_DOCENTE', `Registró al docente ${codigo} — ${nombreU}`);
+            if (materiaIds.length === 0) return res.json({ message: "Docente registrado", codigo });
+
+            const values = materiaIds.map(mid => [docRes.insertId, mid]);
+            db.query("INSERT INTO docente_materias (docente_id, materia_id) VALUES ?", [values], (err3) => {
+              if (err3) return res.status(500).json(err3);
+              res.json({ message: "Docente registrado", codigo });
+            });
           });
         });
       });
@@ -388,10 +444,14 @@ app.post('/api/admin/docentes', (req, res) => {
 app.put('/api/admin/docentes/:id', (req, res) => {
   const { nombre, grado } = req.body;
   const materiaIds = (req.body.materia_ids || []).map(Number).filter(Boolean);
-  const nombreU = (nombre || '').trim().toUpperCase();
-  const gradoU = (grado || '').trim().toUpperCase();
+  const nombreU = limpiar(nombre);
+  const gradoU = limpiar(grado);
   const primaryMateria = materiaIds.length > 0 ? materiaIds[0] : null;
   const docenteId = req.params.id;
+
+  // Mismas reglas que en el alta (la edición ya no es una puerta abierta)
+  const error = validarPersona({ nombre, grado });
+  if (error) return res.status(400).json({ message: error });
 
   materiasSinCupo(materiaIds, docenteId, (cupoErr, llenas) => {
     if (cupoErr) return res.status(500).json(cupoErr);
@@ -429,12 +489,24 @@ app.delete('/api/admin/docentes/:id', (req, res) => {
 
 // --- 4. CONFIGURACIÓN DE PARÁMETROS ACADÉMICOS ---
 app.post('/api/admin/materias', (req, res) => {
-  const { nombre, ciclo } = req.body;
-  const nombreU = (nombre || '').trim().toUpperCase();
-  db.query("INSERT INTO materias (nombre, activa, ciclo) VALUES (?, 1, ?)", [nombreU, ciclo || 'PRIMER CICLO'], (err) => {
-    if (err) return res.status(500).json(err);
-    registrarAuditoria(req, 'CREAR_MATERIA', `Creó la materia ${nombreU} (${ciclo || 'PRIMER CICLO'})`);
-    res.json({ message: "Materia creada" });
+  const { nombre } = req.body;
+  const nombreU = limpiar(nombre);
+  const cicloU = limpiar(req.body.ciclo) || 'PRIMER CICLO';
+
+  const error = validarNombreMateria(nombre) || validarCiclo(cicloU);
+  if (error) return res.status(400).json({ message: error });
+
+  // No puede haber dos materias con el mismo nombre en el mismo ciclo
+  // (antes se creaba "12345" dos veces y quedaban indistinguibles).
+  db.query("SELECT id FROM materias WHERE nombre = ? AND ciclo = ? LIMIT 1", [nombreU, cicloU], (errD, dup) => {
+    if (errD) return res.status(500).json(errD);
+    if (dup.length > 0) return res.status(409).json({ message: `La materia ${nombreU} ya existe en el ${cicloU}` });
+
+    db.query("INSERT INTO materias (nombre, activa, ciclo) VALUES (?, 1, ?)", [nombreU, cicloU], (err) => {
+      if (err) return res.status(500).json(err);
+      registrarAuditoria(req, 'CREAR_MATERIA', `Creó la materia ${nombreU} (${cicloU})`);
+      res.json({ message: "Materia creada" });
+    });
   });
 });
 

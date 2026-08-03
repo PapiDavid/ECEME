@@ -35,7 +35,7 @@ const LoginPage = () => {
 const handleLogin = async (e) => {
   e.preventDefault();
   setLoading(true);
-  try {
+  try {1
     const result = await login(identifier, password);
 
     if (result && result.user) {

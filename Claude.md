@@ -322,3 +322,59 @@ jspdf-autotable (ya estaban instalados en apps/web). Blockchain intacta.
 Flujo real (nota nueva → publicar → bloque #1 encadenado) ✓ · vista
 `v_actas_notas` ✓ · alteración manual detectada como `DATOS_ALTERADOS` ✓ ·
 hash falsificado detectado como `ENLACE_ROTO` en cascada ✓ · demo-reset ✓.
+---
+
+# Registro de avances — 2026-08-03 · VALIDACIÓN DE DATOS (reporte de pruebas)
+
+Cierre de las observaciones del reporte de pruebas del módulo de administración.
+La blockchain NO se tocó (cadena y bitácora verificadas íntegras después).
+**OBS-01 (clave temporal fija) se dejó como está a pedido del usuario: la clave
+institucional sigue siendo `ECEME2026`.**
+
+## Archivos nuevos
+- `apps/server/validaciones.js` — **fuente única de verdad** de las reglas:
+  `GRADOS_MILITARES` (catálogo cerrado de 19 grados + personal civil), `CICLOS`,
+  `limpiar()` (trim + colapsa espacios internos + MAYÚSCULAS), `validarNombre`,
+  `validarGrado`, `validarCI`, `validarCiclo`, `validarNombreMateria`,
+  `validarPersona`.
+- `apps/web/src/lib/validaciones.js` — espejo para avisar en el formulario ANTES
+  de mandar la petición. El catálogo de grados NO se copia: se pide a
+  `GET /api/catalogos`, así no hay dos listas que se puedan desincronizar.
+- `apps/server/limpieza-pruebas.sql` — borra los registros basura de la sesión de
+  pruebas (DOC-012..016, CUR-021, materias «12345»). **Ya corrido el 2026-08-03.**
+- `apps/server/restricciones.sql` — agrega los UNIQUE a la BD viva sin borrar
+  nada. **Ya corrido el 2026-08-03.**
+
+## Reglas que ahora se aplican (servidor Y formulario)
+- **Nombre**: solo letras (con tildes y ñ), espacios, apóstrofes, guiones y
+  puntos; 3–80 caracteres; mínimo 3 letras reales. Se rechaza si empieza con una
+  abreviatura de grado (`CNL.`, `TTE.`…) para que el grado no se escriba dos veces.
+- **Grado**: desplegable con `GRADOS_MILITARES`; dejó de ser texto libre.
+- **CI**: 6–9 dígitos, **único** (y se verifica CRUZADO entre cursantes y
+  docentes: nadie es las dos cosas). Se rechazan los de relleno (`0000000`).
+- **Materia**: 3–60 caracteres, mínimo 3 letras (adiós «12345»), y no se repite
+  el mismo nombre en el mismo ciclo.
+- Todo pasa por `limpiar()`, así que un campo de solo espacios ya no se guarda.
+
+## Puntos clave
+- **La EDICIÓN valida igual que el ALTA**: `PUT /api/admin/estudiantes/:id` y
+  `PUT /api/admin/docentes/:id` llaman a `validarPersona` (antes no validaban
+  nada y desde el lápiz del directorio se podía dejar el nombre vacío).
+- **UNIQUE a nivel de BD** (en `schema.sql` y en `restricciones.sql`):
+  `uq_est_ci`, `uq_doc_ci` y `uq_materia_ciclo`. Ni escribiendo directo en MySQL
+  se puede duplicar un CI.
+- `GET /api/catalogos` → `{grados, ciclos}`, para el desplegable del frontend.
+- Los toasts muestran el mensaje del servidor (helper `mensajeError` en
+  `AdminPage.jsx`), ej. «YA EXISTE UN REGISTRO CON ESE CI: DOC-012», en vez del
+  «ERROR AL REGISTRAR» genérico.
+- **UI**: grado como desplegable (alta y edición inline); materias con 3/3
+  docentes salen en gris y no se pueden elegir; la columna CICLO del docente ya
+  no está vacía (hereda el ciclo de sus materias, «1ER · 2DO» si dicta en ambos);
+  confirmación de borrado con código y nombre de la persona.
+
+## Estado: probado end-to-end (2026-08-03)
+Los 7 casos basura del reporte rechazados con su mensaje (400/409) ✓ · alta y
+edición válidas siguen funcionando con normalización correcta (espacios dobles,
+acentos, mayúsculas) ✓ · UNIQUE bloquea el INSERT directo en MySQL ✓ · build del
+frontend ✓ · cadena de actas VÁLIDA (3 bloques) y bitácora ÍNTEGRA (58 registros)
+después de la limpieza ✓.

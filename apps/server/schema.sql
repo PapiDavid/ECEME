@@ -41,7 +41,9 @@ CREATE TABLE materias (
   id     INT AUTO_INCREMENT PRIMARY KEY,
   nombre VARCHAR(150) NOT NULL,
   activa TINYINT(1) NOT NULL DEFAULT 1,
-  ciclo  ENUM('PRIMER CICLO','SEGUNDO CICLO') NOT NULL DEFAULT 'PRIMER CICLO'
+  ciclo  ENUM('PRIMER CICLO','SEGUNDO CICLO') NOT NULL DEFAULT 'PRIMER CICLO',
+  -- No pueden existir dos materias con el mismo nombre en el mismo ciclo
+  CONSTRAINT uq_materia_ciclo UNIQUE (nombre, ciclo)
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
@@ -57,6 +59,8 @@ CREATE TABLE estudiantes (
   ciclo      ENUM('PRIMER CICLO','SEGUNDO CICLO') NOT NULL,
   materia_id INT NULL,
   docente_id INT NULL,
+  -- El CI es el identificador natural de la persona: no se repite
+  CONSTRAINT uq_est_ci UNIQUE (ci),
   CONSTRAINT fk_est_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
   CONSTRAINT fk_est_materia FOREIGN KEY (materia_id) REFERENCES materias(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
@@ -72,6 +76,8 @@ CREATE TABLE docentes (
   ci         VARCHAR(20),
   grado      VARCHAR(80),
   materia_id INT NULL,
+  -- El CI es el identificador natural de la persona: no se repite
+  CONSTRAINT uq_doc_ci UNIQUE (ci),
   CONSTRAINT fk_doc_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
   CONSTRAINT fk_doc_materia FOREIGN KEY (materia_id) REFERENCES materias(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;

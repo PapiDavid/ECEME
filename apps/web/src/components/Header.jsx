@@ -62,7 +62,7 @@ const Header = () => {
           <div className="flex items-center h-full">
             <Link to="/" className="flex items-center space-x-3 group">
               <img 
-                src="https://horizons-cdn.hostinger.com/f24a0552-55d7-4463-8f2a-a3fa6802b1d4/93aaf264b84890a793999dcf951dc7f9.png" 
+                src="/Imagenes/LOGO.png"
                 alt="ECEME Logo" 
                 className="w-10 h-10 object-contain group-hover:scale-105 transition-transform"
               />
