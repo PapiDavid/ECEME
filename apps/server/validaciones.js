@@ -8,34 +8,41 @@
 //  puertas exijan exactamente lo mismo.
 // ============================================================
 
-// Catálogo cerrado de grados. El campo dejó de ser texto libre:
-// en el frontend es un desplegable armado con esta misma lista.
-const GRADOS_MILITARES = [
-  // Oficiales generales
-  'GENERAL DE EJÉRCITO',
-  'GENERAL DE DIVISIÓN',
-  'GENERAL DE BRIGADA',
-  // Oficiales superiores (jefes)
-  'CORONEL',
-  'TENIENTE CORONEL',
-  'MAYOR',
-  // Oficiales subalternos
+// Catálogos cerrados de grados. El campo dejó de ser texto libre: en el
+// frontend son desplegables armados con estas mismas listas.
+// OJO: cursante y docente NO comparten catálogo, porque en la ECEME no es el
+// mismo universo de grados.
+
+// Los cursantes de la ECEME son oficiales que hacen el curso de comando:
+// capitanes y mayores.
+const GRADOS_CURSANTE = [
   'CAPITÁN',
-  'TENIENTE',
-  'SUBTENIENTE',
-  // Suboficiales y sargentos
-  'SUBOFICIAL MAESTRO',
-  'SUBOFICIAL MAYOR',
-  'SUBOFICIAL PRIMERO',
-  'SUBOFICIAL SEGUNDO',
-  'SARGENTO PRIMERO',
-  'SARGENTO SEGUNDO',
-  // Personal civil (docentes invitados)
-  'LIC.',
-  'ING.',
-  'DR.',
-  'MSC.'
+  'MAYOR'
 ];
+
+// Los docentes son jefes (lo habitual), excepcionalmente generales, o
+// personal civil con posgrado.
+const GRADOS_DOCENTE = [
+  'TENIENTE CORONEL',
+  'CORONEL',
+  // Poco frecuentes, pero posibles
+  'GENERAL DE BRIGADA',
+  'GENERAL DE DIVISIÓN',
+  'GENERAL DE EJÉRCITO',
+  // Personal civil con maestría o doctorado
+  'MSC.',
+  'DR.'
+];
+
+// Unión de ambos: sirve para validar cuando no se sabe el tipo de persona.
+const GRADOS_MILITARES = [...new Set([...GRADOS_CURSANTE, ...GRADOS_DOCENTE])];
+
+// Devuelve el catálogo que corresponde según a quién se esté registrando.
+function gradosDe(tipo) {
+  if (tipo === 'cursante') return GRADOS_CURSANTE;
+  if (tipo === 'docente') return GRADOS_DOCENTE;
+  return GRADOS_MILITARES;
+}
 
 const CICLOS = ['PRIMER CICLO', 'SEGUNDO CICLO'];
 
@@ -73,10 +80,15 @@ function validarNombre(nombre) {
   return null;
 }
 
-function validarGrado(grado) {
+function validarGrado(grado, tipo) {
   const g = limpiar(grado);
   if (!g) return 'El grado es obligatorio';
-  if (!GRADOS_MILITARES.includes(g)) return `Grado no válido: seleccione uno de la lista oficial`;
+  const permitidos = gradosDe(tipo);
+  if (!permitidos.includes(g)) {
+    if (tipo === 'cursante') return `Grado no válido para un cursante: solo ${GRADOS_CURSANTE.join(' o ')}`;
+    if (tipo === 'docente') return 'Grado no válido para un docente: seleccione uno de la lista oficial';
+    return 'Grado no válido: seleccione uno de la lista oficial';
+  }
   return null;
 }
 
@@ -111,17 +123,21 @@ function validarNombreMateria(nombre) {
 
 // Valida una persona completa (cursante o docente) y devuelve el primer
 // error encontrado, o null si todo está bien.
+//   opciones.tipo     → 'cursante' | 'docente' (elige el catálogo de grados)
 //   opciones.conCI    → valida el CI (solo en el alta; en la edición no se toca)
 //   opciones.conCiclo → valida el ciclo (solo cursantes)
 function validarPersona(datos, opciones = {}) {
   return validarNombre(datos.nombre)
-    || validarGrado(datos.grado)
+    || validarGrado(datos.grado, opciones.tipo)
     || (opciones.conCI ? validarCI(datos.ci) : null)
     || (opciones.conCiclo ? validarCiclo(datos.ciclo) : null);
 }
 
 module.exports = {
   GRADOS_MILITARES,
+  GRADOS_CURSANTE,
+  GRADOS_DOCENTE,
+  gradosDe,
   CICLOS,
   limpiar,
   validarNombre,

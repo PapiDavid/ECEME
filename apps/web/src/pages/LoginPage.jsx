@@ -12,6 +12,15 @@ import Header from '@/components/Header.jsx';
 import Footer from '@/components/Footer.jsx';
 import { Shield } from 'lucide-react';
 
+// Ejemplo de identificador según el perfil elegido. Tiene que coincidir con los
+// códigos que genera el backend (CUR-XXX y DOC-XXX), o el usuario escribe mal.
+const ejemploIdentificador = (rol) => {
+  if (rol === 'admin') return 'admin@eceme.mil.bo';
+  if (rol === 'profesor') return 'EJ: DOC-001';
+  if (rol === 'alumno') return 'EJ: CUR-001';
+  return 'SELECCIONE PRIMERO EL PERFIL';
+};
+
 const LoginPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -35,7 +44,7 @@ const LoginPage = () => {
 const handleLogin = async (e) => {
   e.preventDefault();
   setLoading(true);
-  try {1
+  try {
     const result = await login(identifier, password);
 
     if (result && result.user) {
@@ -128,7 +137,7 @@ const handleLogin = async (e) => {
                           onChange={(e) => setIdentifier(e.target.value)}
                           required
                           className="mt-2 border-2 border-border focus-visible:ring-primary text-foreground font-bold h-12 uppercase"
-                          placeholder={rol === 'admin' ? 'admin@eceme.edu.bo' : 'EJ: ALU-1001'}
+                          placeholder={ejemploIdentificador(rol)}
                           disabled={!rol}
                         />
                       </div>

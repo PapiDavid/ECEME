@@ -15,6 +15,29 @@ import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
+// Escudo institucional para el membrete de los PDF. jsPDF necesita la imagen
+// como data URL, así que se lee una sola vez y se guarda en caché (fuera del
+// componente, para que sobreviva a los re-renders).
+let logoCache;
+const cargarLogo = async () => {
+  if (logoCache !== undefined) return logoCache;
+  try {
+    const res = await fetch('/Imagenes/LOGO.png');
+    const blob = await res.blob();
+    logoCache = await new Promise((resolve, reject) => {
+      const lector = new FileReader();
+      lector.onload = () => resolve(lector.result);
+      lector.onerror = reject;
+      lector.readAsDataURL(blob);
+    });
+  } catch (e) {
+    // Si el escudo no se puede leer, el reporte igual se genera (sin logo)
+    console.error('No se pudo cargar el escudo para el PDF:', e);
+    logoCache = null;
+  }
+  return logoCache;
+};
+
 const AdminPage = () => {
   const navigate = useNavigate();
   const [materias, setMaterias] = useState([]);
@@ -27,8 +50,11 @@ const AdminPage = () => {
   const [docentes, setDocentes] = useState([]);
   const [asignaciones, setAsignaciones] = useState([]);
   const [materiaToDelete, setMateriaToDelete] = useState('');
-  // Catálogo oficial de grados (viene del backend: una sola lista para todos)
-  const [grados, setGrados] = useState([]);
+  // Catálogos oficiales de grados (vienen del backend). Van separados por rol:
+  // el cursante es capitán o mayor; el docente es jefe, general o civil con
+  // posgrado. Así el desplegable no ofrece grados que no corresponden.
+  const [gradosCursante, setGradosCursante] = useState([]);
+  const [gradosDocente, setGradosDocente] = useState([]);
 
   // Estados de formularios (el código se genera automáticamente en el backend)
   const [alumnoForm, setAlumnoForm] = useState({ nombre: '', ci: '', grado: '', ciclo: 'PRIMER CICLO', asignacion_id: '', materia_id: '', docente_id: '' });
@@ -38,6 +64,8 @@ const AdminPage = () => {
   // Docentes que ya dictan una materia (según su lista de materia_ids)
   const docentesDeMateria = (materiaId) => docentes.filter(d =>
     d.materia_ids && String(d.materia_ids).split(',').map(Number).includes(Number(materiaId)));
+  // Catálogo de grados que corresponde a cada tipo de persona
+  const gradosDe = (tipo) => (tipo === 'docente' ? gradosDocente : gradosCursante);
   // Tope de docentes por materia (misma regla que aplica el backend)
   const MAX_DOCENTES = 3;
   const materiaLlena = (materiaId) => docentesDeMateria(materiaId).length >= MAX_DOCENTES;
@@ -84,7 +112,8 @@ const AdminPage = () => {
         api.get('/catalogos')
       ]);
 
-      setGrados(catRes.data.grados || []);
+      setGradosCursante(catRes.data.grados_cursante || []);
+      setGradosDocente(catRes.data.grados_docente || []);
       setMaterias(matRes.data);
       setCriterios(critRes.data);
       if (confRes.data) { setConfig(confRes.data); setComandanteName(confRes.data.comandante_nombre || ''); }
@@ -128,7 +157,7 @@ const AdminPage = () => {
   // La edición exige exactamente lo mismo que el alta (nombre y grado válidos);
   // el servidor vuelve a validar, así que no se puede saltar desde el navegador.
   const handleUpdateUser = async () => {
-    const error = validarPersona(editForm, grados);
+    const error = validarPersona(editForm, gradosDe(editForm.type));
     if (error) return toast.error(error);
     try {
       const endpoint = editForm.type === 'estudiante' ? `/admin/estudiantes/${editingId}` : `/admin/docentes/${editingId}`;
@@ -173,7 +202,7 @@ const AdminPage = () => {
 
   const handleAddAlumno = async e => {
     e.preventDefault();
-    const error = validarPersona(alumnoForm, grados, { conCI: true });
+    const error = validarPersona(alumnoForm, gradosCursante, { conCI: true });
     if (error) return toast.error(error);
     if (!alumnoForm.materia_id) return toast.error('SELECCIONE UNA MATERIA');
     try {
@@ -186,7 +215,7 @@ const AdminPage = () => {
 
   const handleAddDocente = async e => {
     e.preventDefault();
-    const error = validarPersona(docenteForm, grados, { conCI: true });
+    const error = validarPersona(docenteForm, gradosDocente, { conCI: true });
     if (error) return toast.error(error);
     if (!docenteForm.materia_id) return toast.error('SELECCIONE UNA MATERIA');
     if (materiaLlena(docenteForm.materia_id)) return toast.error(`ESA MATERIA YA TIENE EL MÁXIMO DE ${MAX_DOCENTES} DOCENTES`);
@@ -279,17 +308,33 @@ const AdminPage = () => {
   const UMBRAL_MUY_BUENO = 75;   // promedio >= 75  → MUY BUENO
   //                                promedio <  75  → REGULAR
 
-  // Encabezado institucional centrado (va en TODOS los reportes).
+  // Membrete institucional (va en TODOS los reportes): escudo arriba a la
+  // izquierda con el nombre de la Escuela debajo, y el resto centrado.
   // Devuelve la coordenada Y donde puede empezar el contenido.
-  const encabezadoInstitucional = (doc) => {
+  const encabezadoInstitucional = (doc, logo) => {
     const cx = doc.internal.pageSize.getWidth() / 2;
+
+    if (logo) {
+      const LOGO_X = 15, LOGO_Y = 12, LOGO_LADO = 22;
+      doc.addImage(logo, 'PNG', LOGO_X, LOGO_Y, LOGO_LADO, LOGO_LADO);
+      // Nombre de la Escuela justo debajo del escudo. Va alineado a la izquierda
+      // sobre el mismo margen (15 mm) que usan las tablas, para que el membrete
+      // quede a plomo con el resto del documento.
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6);
+      doc.text('ESCUELA DE COMANDO Y ESTADO MAYOR DEL EJÉRCITO',
+        LOGO_X, LOGO_Y + LOGO_LADO + 4,
+        { maxWidth: 40, lineHeightFactor: 1.3 });
+    }
+
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.text('COMANDO DE INSTITUTOS MILITARES', cx, 18, { align: 'center' });
     doc.text('ESCUELA DE COMANDO Y ESTADO MAYOR DEL EJÉRCITO', cx, 24, { align: 'center' });
     doc.text('"MCAL. ANDRÉS DE SANTA CRUZ"', cx, 30, { align: 'center' });
     doc.text('BOLIVIA', cx, 36, { align: 'center' });
-    return 48;
+    // El escudo con su leyenda baja más que el bloque centrado
+    return logo ? 52 : 48;
   };
 
   // Bloque de firma centrado (va al pie de TODOS los reportes).
@@ -315,9 +360,10 @@ const AdminPage = () => {
     if (!materiaId) return toast.error('SELECCIONE UNA MATERIA PARA EL ACTA');
     try {
       const { data } = await api.get(`/reportes/acta/${materiaId}`);
+      const logo = await cargarLogo();
       const doc = new jsPDF({ format: 'letter' });
       const cx = doc.internal.pageSize.getWidth() / 2;
-      let y = encabezadoInstitucional(doc);
+      let y = encabezadoInstitucional(doc, logo);
 
       doc.setFontSize(13);
       doc.setFont('helvetica', 'bold');
@@ -369,9 +415,10 @@ const AdminPage = () => {
       const { data } = await api.get('/reportes/desempeno-docente');
       if (!data.docentes || data.docentes.length === 0) return toast.error('AÚN NO HAY EVALUACIONES DOCENTES REGISTRADAS');
 
+      const logo = await cargarLogo();
       const doc = new jsPDF({ format: 'letter' });
       const cx = doc.internal.pageSize.getWidth() / 2;
-      let y = encabezadoInstitucional(doc);
+      let y = encabezadoInstitucional(doc, logo);
 
       doc.setFontSize(13);
       doc.setFont('helvetica', 'bold');
@@ -537,7 +584,7 @@ const AdminPage = () => {
             ) : (
               pag.items.map(n => (
                 <tr key={n.id} className="hover:bg-muted/30">
-                  <td className="font-bold uppercase text-[11px] py-3">{n.nombre_estudiante}</td>
+                  <td className="font-bold uppercase text-[11px] py-3">{`${n.grado_estudiante || ''} ${n.nombre_estudiante}`.trim()}</td>
                   <td className="uppercase text-[10px] font-bold text-muted-foreground">{n.nombre_materia}</td>
                   <td className="text-center font-black">
                     <span className={`px-2 py-1 rounded-sm ${n.nota_final >= 51 ? 'bg-primary/10 text-primary' : 'bg-destructive/10 text-destructive'}`}>
@@ -594,11 +641,11 @@ const AdminPage = () => {
                   <Input placeholder="NOMBRE COMPLETO (SIN EL GRADO)" value={alumnoForm.nombre} onChange={e => setAlumnoForm({...alumnoForm, nombre: e.target.value})} maxLength={80} className="font-bold uppercase" required />
                   <Input placeholder="CARNET DE IDENTIDAD (CI)" inputMode="numeric" value={alumnoForm.ci} onChange={e => setAlumnoForm({...alumnoForm, ci: e.target.value.replace(/\D/g, '')})} maxLength={9} className="font-bold" required />
 
-                  {/* El grado es un conjunto cerrado: se elige de la lista oficial */}
+                  {/* Grados de cursante: capitán o mayor (lista cerrada) */}
                   <Select value={alumnoForm.grado} onValueChange={v => setAlumnoForm({...alumnoForm, grado: v})}>
                     <SelectTrigger className="font-bold"><SelectValue placeholder="GRADO" /></SelectTrigger>
                     <SelectContent>
-                      {grados.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+                      {gradosCursante.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
                     </SelectContent>
                   </Select>
 
@@ -644,11 +691,11 @@ const AdminPage = () => {
                   <Input placeholder="NOMBRE COMPLETO (SIN EL GRADO)" value={docenteForm.nombre} onChange={e => setDocenteForm({...docenteForm, nombre: e.target.value})} maxLength={80} className="font-bold uppercase" required />
                   <Input placeholder="CARNET DE IDENTIDAD (CI)" inputMode="numeric" value={docenteForm.ci} onChange={e => setDocenteForm({...docenteForm, ci: e.target.value.replace(/\D/g, '')})} maxLength={9} className="font-bold" required />
 
-                  {/* El grado es un conjunto cerrado: se elige de la lista oficial */}
+                  {/* Grados de docente: jefes, generales o civil con posgrado */}
                   <Select value={docenteForm.grado} onValueChange={v => setDocenteForm({...docenteForm, grado: v})}>
                     <SelectTrigger className="font-bold"><SelectValue placeholder="GRADO" /></SelectTrigger>
                     <SelectContent>
-                      {grados.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+                      {gradosDocente.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
                     </SelectContent>
                   </Select>
 
@@ -784,11 +831,11 @@ const AdminPage = () => {
                         <td className="py-4">
                           {editingId === user.id ? (
                             <div className="flex space-x-2">
-                              {/* Mismo desplegable de grados que en el alta */}
+                              {/* Mismo desplegable que en el alta, según sea cursante o docente */}
                               <Select value={editForm.grado || ''} onValueChange={v => setEditForm({...editForm, grado: v})}>
                                 <SelectTrigger className="h-8 text-[10px] font-bold w-32 border-2"><SelectValue placeholder="GRADO" /></SelectTrigger>
                                 <SelectContent>
-                                  {grados.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+                                  {gradosDe(editForm.type).map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
                                 </SelectContent>
                               </Select>
                               <Input className="h-8 text-xs font-bold" value={editForm.nombre} onChange={e => setEditForm({...editForm, nombre: e.target.value})} maxLength={80} />

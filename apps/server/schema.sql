@@ -24,7 +24,7 @@ DROP TABLE IF EXISTS usuarios;
 
 -- ------------------------------------------------------------
 -- USUARIOS (autenticación). identificador = correo (admin) o código (docente/cursante)
--- OJO: hoy la contraseña se guarda en TEXTO PLANO. Pendiente: hashear con bcrypt.
+-- NOTA: la contraseña se guarda HASHEADA con bcrypt (10 rondas de salt), nunca en texto plano.
 -- ------------------------------------------------------------
 CREATE TABLE usuarios (
   id            INT AUTO_INCREMENT PRIMARY KEY,
@@ -225,7 +225,7 @@ CREATE TABLE auditoria (
 ) ENGINE=InnoDB;
 
 -- ============================================================
---  DATOS DE PRUEBA (contraseñas en texto plano por ahora)
+--  DATOS DE PRUEBA (contraseñas de siembra: ejecutar 'npm run hash:pwd' para hashearlas con bcrypt)
 -- ============================================================
 
 -- Configuración inicial

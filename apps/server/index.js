@@ -6,8 +6,8 @@ const bcrypt = require('bcryptjs');
 const { GENESIS_PREV, calcularHash } = require('./blockchain');
 const { GENESIS_AUDITORIA, calcularHashAuditoria } = require('./auditoria-hash');
 const {
-  GRADOS_MILITARES, CICLOS, limpiar,
-  validarPersona, validarNombre, validarGrado, validarNombreMateria, validarCiclo
+  GRADOS_CURSANTE, GRADOS_DOCENTE, CICLOS, limpiar,
+  validarPersona, validarNombreMateria, validarCiclo
 } = require('./validaciones');
 require('dotenv').config();
 
@@ -118,6 +118,34 @@ function registrarAuditoria(req, accion, detalle, actorOverride) {
 
 // Consulta de logs para el panel del admin: del más reciente al más antiguo,
 // con filtro opcional ?q= (por usuario o acción). Consulta parametrizada.
+// ============================================================
+//  AUTORIZACION (RBAC) - control de acceso por rol en el SERVIDOR
+//  El rol se consulta en la base de datos y NO se toma de la
+//  cabecera X-Usuario-Rol, porque esa cabecera la envia el cliente
+//  y por lo tanto es manipulable. Todo intento denegado queda
+//  registrado en la bitacora de auditoria.
+// ============================================================
+function requiereRol(...rolesPermitidos) {
+  return (req, res, next) => {
+    const id = req.actor && req.actor.usuario_id;
+    if (!id) return res.status(401).json({ message: 'No autenticado' });
+    db.query("SELECT rol FROM usuarios WHERE id = ?", [id], (err, rows) => {
+      if (err) return res.status(500).json(err);
+      if (rows.length === 0) return res.status(401).json({ message: 'No autenticado' });
+      if (!rolesPermitidos.includes(rows[0].rol)) {
+        registrarAuditoria(req, 'ACCESO_DENEGADO',
+          `Intento de acceso a ${req.method} ${req.originalUrl}`);
+        return res.status(403).json({ message: 'No autorizado' });
+      }
+      next();
+    });
+  };
+}
+
+// Protege TODO el espacio de nombres /api/admin/* de una sola vez.
+// Debe declararse ANTES de las rutas administrativas.
+app.use('/api/admin', requiereRol('admin'));
+
 app.get('/api/admin/auditoria', (req, res) => {
   const q = String(req.query.q || '').trim();
   let sql = "SELECT * FROM auditoria";
@@ -199,8 +227,14 @@ function buscarCIDuplicado(ci, excluir, cb) {
 // Catálogos cerrados que consume el frontend (grados y ciclos). Así el
 // desplegable del formulario y la validación del servidor salen de la
 // MISMA lista y no se pueden desincronizar.
+// Los grados van separados por rol: un cursante no puede ser general, ni un
+// docente ser capitán.
 app.get('/api/catalogos', (req, res) => {
-  res.json({ grados: GRADOS_MILITARES, ciclos: CICLOS });
+  res.json({
+    grados_cursante: GRADOS_CURSANTE,
+    grados_docente: GRADOS_DOCENTE,
+    ciclos: CICLOS
+  });
 });
 
 // --- 1. AUTENTICACIÓN ---
@@ -272,7 +306,8 @@ app.get('/api/configuracion', (req, res) => {
 
 app.get('/api/notas/consolidado', (req, res) => {
   const sql = `
-    SELECT n.id, e.nombre AS nombre_estudiante, m.nombre AS nombre_materia, e.ciclo, n.nota_final 
+    SELECT n.id, e.nombre AS nombre_estudiante, e.grado AS grado_estudiante,
+           m.nombre AS nombre_materia, e.ciclo, n.nota_final
     FROM notas n
     JOIN estudiantes e ON n.estudiante_id = e.id
     JOIN materias m ON n.materia_id = m.id
@@ -313,7 +348,7 @@ app.post('/api/admin/estudiantes', (req, res) => {
   const ciL = String(ci == null ? '' : ci).trim();
 
   // Reglas de negocio (las mismas que aplica el formulario, pero aquí mandan)
-  const error = validarPersona({ nombre, grado, ci, ciclo }, { conCI: true, conCiclo: true });
+  const error = validarPersona({ nombre, grado, ci, ciclo }, { tipo: 'cursante', conCI: true, conCiclo: true });
   if (error) return res.status(400).json({ message: error });
 
   buscarCIDuplicado(ciL, null, (errCI, codigoExistente) => {
@@ -351,7 +386,7 @@ app.put('/api/admin/estudiantes/:id', (req, res) => {
 
   // La edición exige lo MISMO que el alta (antes no validaba nada y se podía
   // dejar el nombre vacío desde el lápiz del directorio).
-  const error = validarPersona({ nombre, grado, ciclo }, { conCiclo: true });
+  const error = validarPersona({ nombre, grado, ciclo }, { tipo: 'cursante', conCiclo: true });
   if (error) return res.status(400).json({ message: error });
 
   const sql = "UPDATE estudiantes SET nombre = ?, grado = ?, ciclo = ?, materia_id = ?, docente_id = ? WHERE id = ?";
@@ -402,7 +437,7 @@ app.post('/api/admin/docentes', (req, res) => {
   const gradoU = limpiar(grado);
   const ciL = String(ci == null ? '' : ci).trim();
 
-  const error = validarPersona({ nombre, grado, ci }, { conCI: true });
+  const error = validarPersona({ nombre, grado, ci }, { tipo: 'docente', conCI: true });
   if (error) return res.status(400).json({ message: error });
 
   buscarCIDuplicado(ciL, null, (errCI, codigoExistente) => {
@@ -450,7 +485,7 @@ app.put('/api/admin/docentes/:id', (req, res) => {
   const docenteId = req.params.id;
 
   // Mismas reglas que en el alta (la edición ya no es una puerta abierta)
-  const error = validarPersona({ nombre, grado });
+  const error = validarPersona({ nombre, grado }, { tipo: 'docente' });
   if (error) return res.status(400).json({ message: error });
 
   materiasSinCupo(materiaIds, docenteId, (cupoErr, llenas) => {
@@ -547,7 +582,7 @@ app.post('/api/admin/criterios', (req, res) => {
   });
 });
 
-app.post('/api/configuracion', (req, res) => {
+app.post('/api/configuracion', requiereRol('admin'), (req, res) => {
   const { comandante_nombre } = req.body;
   db.query("UPDATE configuracion SET comandante_nombre = ? WHERE id = 1", [comandante_nombre], (err, result) => {
     if (err) return res.status(500).json(err);
@@ -560,7 +595,7 @@ app.post('/api/configuracion', (req, res) => {
 });
 
 // --- 5. GESTIÓN DE CALIFICACIONES ---
-app.post('/api/notas', (req, res) => {
+app.post('/api/notas', requiereRol('admin', 'profe'), (req, res) => {
   const { estudiante_id, docente_id, materia_id, parcial_1, parcial_final, trabajos } = req.body;
   const sql = "INSERT INTO notas (estudiante_id, docente_id, materia_id, parcial_1, parcial_final, trabajos) VALUES (?, ?, ?, ?, ?, ?)";
   db.query(sql, [estudiante_id, docente_id, materia_id, parcial_1, parcial_final, trabajos], (err) => {
@@ -569,7 +604,7 @@ app.post('/api/notas', (req, res) => {
   });
 });
 
-app.post('/api/notas/publicar-lote', (req, res) => {
+app.post('/api/notas/publicar-lote', requiereRol('admin'), (req, res) => {
   db.query("UPDATE notas SET publicado = 1", (err) => {
     if (err) return res.status(500).json(err);
     registrarAuditoria(req, 'PUBLICAR_NOTAS', 'Publicó el tablero de notas (lote completo)');
@@ -630,7 +665,7 @@ function sellarActasSecuencial(actas, res) {
 
 // --- Publicar un acta y sellarla en la cadena ---
 // Body opcional { materia_id }. Sin materia_id => acta general de todas las notas.
-app.post('/api/actas/publicar', (req, res) => {
+app.post('/api/actas/publicar', requiereRol('admin'), (req, res) => {
   const body = req.body || {};
   const materiaId = body.materia_id ? parseInt(body.materia_id) : null;
   // Se puede publicar por materia, por CICLO (un tablero por ciclo en el admin)
@@ -780,7 +815,8 @@ app.post('/api/blockchain/demo-reset', (req, res) => {
 
 app.get('/api/notas/docente-historial/:id', (req, res) => {
   const sql = `
-    SELECT n.*, e.nombre AS nombre_estudiante, m.nombre AS nombre_materia 
+    SELECT n.*, e.nombre AS nombre_estudiante, e.grado AS grado_estudiante,
+           m.nombre AS nombre_materia
     FROM notas n
     JOIN estudiantes e ON n.estudiante_id = e.id
     JOIN materias m ON n.materia_id = m.id
@@ -925,7 +961,8 @@ app.delete('/api/notes/:id', (req, res) => {
 // --- 7. PORTAL DOCENTE & CONSULTAS DE EVALUACIÓN ---
 app.get('/api/home/notas', (req, res) => {
   const sql = `
-    SELECT e.nombre AS nombre_estudiante, n.nota_final, m.nombre AS nombre_materia, e.ciclo 
+    SELECT e.nombre AS nombre_estudiante, e.grado AS grado_estudiante,
+           n.nota_final, m.nombre AS nombre_materia, e.ciclo
     FROM notas n
     JOIN estudiantes e ON n.estudiante_id = e.id
     JOIN materias m ON n.materia_id = m.id
@@ -981,7 +1018,7 @@ app.get('/api/docentes/:docenteId/materia/:materiaId/estudiantes', (req, res) =>
 });
 
 // El cursante evalúa al docente de su materia (guarda una fila por criterio)
-app.post('/api/estudiantes/evaluar-docente', (req, res) => {
+app.post('/api/estudiantes/evaluar-docente', requiereRol('alumno', 'admin'), (req, res) => {
   const { estudiante_id, materia_id, calificaciones } = req.body;
   const entries = Object.entries(calificaciones || {});
   if (!estudiante_id || !materia_id || entries.length === 0) {
@@ -1031,7 +1068,7 @@ app.get('/api/notas/docente/:docenteId/:materiaId', (req, res) => {
   });
 });
 
-app.post('/api/notas/guardar-planilla', (req, res) => {
+app.post('/api/notas/guardar-planilla', requiereRol('admin', 'profe'), (req, res) => {
   const { planilla } = req.body;
   if (!planilla || planilla.length === 0) {
     return res.status(400).json({ message: "No hay datos para guardar" });

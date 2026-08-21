@@ -116,7 +116,7 @@ const DocentePage = () => {
       }
 
       await api.post('/notas/guardar-planilla', { planilla });
-      toast.success('REGISTROS MILITARES ACTUALIZADOS EN MYSQL');
+      toast.success('NOTAS SUBIDAS CORRECTAMENTE');
     } catch (err) {
       console.error(err);
       toast.error('ERROR AL GUARDAR EN LA BASE DE DATOS');
@@ -227,7 +227,7 @@ const DocentePage = () => {
                     disabled={saving || estudiantes.length === 0}
                     className="bg-[#1b5e20] hover:bg-[#2e7d32] text-white font-black tracking-widest uppercase px-8 h-12 rounded-none border-b-4 border-yellow-600"
                   >
-                    <Save size={18} className="mr-2" /> {saving ? 'SINCRONIZANDO...' : 'GUARDAR MYSQL'}
+                    <Save size={18} className="mr-2" /> {saving ? 'SUBIENDO...' : 'SUBIR NOTAS'}
                   </Button>
                 </div>
 

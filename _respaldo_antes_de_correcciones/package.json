@@ -1,0 +1,23 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node --watch index.js",
+    "start": "node index.js",
+    "db:setup": "mysql -u root -p < schema.sql",
+    "hash:pwd": "node hashear-passwords.js",
+    "sellar:log": "node sellar-auditoria.js",
+    "datos:demo": "node datos-demo.js",
+    "notas:demo": "node notas-demo.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcryptjs": "^3.0.3"
+  }
+}

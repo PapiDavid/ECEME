@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
-import { UserSquare, FileText, Star, Send } from 'lucide-react';
+import { UserSquare, FileText, Star, Send, ChevronLeft, ChevronRight } from 'lucide-react';
 import Header from '@/components/Header.jsx';
 import Footer from '@/components/Footer.jsx';
 // 1. Importamos la nueva API de Axios
@@ -25,6 +25,11 @@ const EstudiantePage = () => {
   const [submittingEval, setSubmittingEval] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // La evaluación se responde por páginas, como un formulario normal:
+  // el cursante ve pocas preguntas a la vez y avanza con Anterior/Siguiente.
+  const PREGUNTAS_POR_PAGINA = 5;
+  const [evalPage, setEvalPage] = useState(0);
+
   const fetchData = async () => {
     if (!currentUser?.id) return;
     try {
@@ -34,7 +39,8 @@ const EstudiantePage = () => {
       const [estRes, notasRes, critRes] = await Promise.all([
         api.get(`/estudiantes/perfil/${currentUser.id}`),
         api.get(`/notas/estudiante/${currentUser.id}`),
-        api.get('/admin/criterios')
+        // Ruta publica de criterios: /admin/* exige rol admin y el cursante no lo es
+        api.get('/criterios')
       ]);
       
       if (estRes.data) {
@@ -74,9 +80,31 @@ const EstudiantePage = () => {
     setEvaluaciones(prev => ({ ...prev, [critId]: val }));
   };
 
+  // --- Paginación de la evaluación ---
+  const totalPaginas = Math.max(1, Math.ceil(criterios.length / PREGUNTAS_POR_PAGINA));
+  const paginaActual = Math.min(evalPage, totalPaginas - 1);
+  const criteriosPagina = criterios.slice(paginaActual * PREGUNTAS_POR_PAGINA, (paginaActual + 1) * PREGUNTAS_POR_PAGINA);
+  const respondidas = criterios.filter(c => evaluaciones[c.id]).length;
+  const faltanEnPagina = criteriosPagina.some(c => !evaluaciones[c.id]);
+
+  // No se puede avanzar dejando preguntas en blanco (así la evaluación
+  // llega completa y no hay que revisar al final qué faltó).
+  const irSiguiente = () => {
+    if (faltanEnPagina) return toast.error('RESPONDA LA PREGUNTA ANTES DE CONTINUAR');
+    setEvalPage(p => Math.min(totalPaginas - 1, p + 1));
+  };
+  const irAnterior = () => setEvalPage(p => Math.max(0, p - 1));
+
   const handleSubmitEval = async () => {
     if (!estudiante || !activeMateriaId) return toast.error('NO HAY MATERIA ACTIVA PARA EVALUAR');
-    
+
+    // Si quedó alguna sin responder, lo llevamos a esa página
+    const faltante = criterios.findIndex(c => !evaluaciones[c.id]);
+    if (faltante !== -1) {
+      setEvalPage(Math.floor(faltante / PREGUNTAS_POR_PAGINA));
+      return toast.error('DEBE RESPONDER TODAS LAS PREGUNTAS ANTES DE ENVIAR');
+    }
+
     setSubmittingEval(true);
     try {
       // 3. Enviamos la evaluación al servidor de Node.js
@@ -87,6 +115,7 @@ const EstudiantePage = () => {
       });
       
       toast.success('EVALUACIÓN ENVIADA AL COMANDO. GRACIAS POR SU APORTE.');
+      setEvalPage(0);
     } catch (err) {
       console.error(err);
       toast.error('ERROR AL REGISTRAR LA EVALUACIÓN.');
@@ -215,19 +244,40 @@ const EstudiantePage = () => {
                     <p className="text-[11px] font-bold text-foreground uppercase bg-muted p-4 border-l-4 border-accent">
                       ESCALA: 1 (NUNCA) - 5 (SIEMPRE). SU OPINIÓN ES FUNDAMENTAL PARA LA CALIDAD ACADÉMICA.
                     </p>
-                    
-                    <div className="space-y-6">
-                      {criterios.map((c, idx) => (
+
+                    {/* Avance: cuántas preguntas van respondidas de todas */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                          PÁGINA {paginaActual + 1} DE {totalPaginas}
+                        </span>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-accent">
+                          {respondidas} DE {criterios.length} RESPONDIDAS
+                        </span>
+                      </div>
+                      <div className="h-2 w-full bg-muted border border-border">
+                        <div
+                          className="h-full bg-accent transition-all duration-300"
+                          style={{ width: `${(respondidas / criterios.length) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Solo las preguntas de esta página */}
+                    <div className="space-y-6 min-h-[150px]">
+                      {criteriosPagina.map((c, idx) => (
                         <div key={c.id} className="border-b-2 border-border pb-6 last:border-0">
-                          <p className="text-sm font-bold text-foreground mb-4 uppercase">{idx + 1}. {c.pregunta}</p>
+                          <p className="text-sm font-bold text-foreground mb-4 uppercase">
+                            {paginaActual * PREGUNTAS_POR_PAGINA + idx + 1}. {c.pregunta}
+                          </p>
                           <div className="flex flex-wrap gap-3">
                             {[1, 2, 3, 4, 5].map(val => (
                               <button
                                 key={val}
                                 onClick={() => handleEvalChange(c.id, val)}
                                 className={`w-12 h-12 flex items-center justify-center border-2 font-black transition-transform active:scale-95 ${
-                                  evaluaciones[c.id] === val 
-                                    ? 'bg-accent border-accent text-accent-foreground scale-110' 
+                                  evaluaciones[c.id] === val
+                                    ? 'bg-accent border-accent text-accent-foreground scale-110'
                                     : 'bg-background border-border text-muted-foreground hover:border-accent'
                                 }`}
                               >
@@ -239,14 +289,53 @@ const EstudiantePage = () => {
                       ))}
                     </div>
 
-                    <div className="pt-6">
-                      <Button 
-                        onClick={handleSubmitEval} 
-                        disabled={submittingEval || !activeMateriaId}
-                        className="w-full md:w-auto bg-accent text-accent-foreground font-black tracking-widest h-14 px-10 uppercase"
+                    {/* Navegación: el botón de enviar solo aparece en la última página */}
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-6 border-t-2 border-border">
+                      <Button
+                        onClick={irAnterior}
+                        disabled={paginaActual === 0}
+                        variant="outline"
+                        className="w-full sm:w-auto border-2 font-black tracking-widest h-12 px-8 uppercase rounded-none disabled:opacity-40"
                       >
-                        {submittingEval ? 'ENVIANDO...' : 'CONFIRMAR Y ENVIAR EVALUACIÓN'}
+                        <ChevronLeft size={18} className="mr-2" /> Anterior
                       </Button>
+
+                      {/* Puntitos: dónde está y cuáles ya respondió */}
+                      <div className="flex gap-2 order-first sm:order-none">
+                        {Array.from({ length: totalPaginas }).map((_, i) => {
+                          const completa = criterios
+                            .slice(i * PREGUNTAS_POR_PAGINA, (i + 1) * PREGUNTAS_POR_PAGINA)
+                            .every(c => evaluaciones[c.id]);
+                          return (
+                            <span
+                              key={i}
+                              title={`PÁGINA ${i + 1}`}
+                              className={`w-3 h-3 border-2 ${
+                                i === paginaActual ? 'bg-accent border-accent'
+                                  : completa ? 'bg-accent/40 border-accent/40'
+                                  : 'bg-background border-border'
+                              }`}
+                            />
+                          );
+                        })}
+                      </div>
+
+                      {paginaActual < totalPaginas - 1 ? (
+                        <Button
+                          onClick={irSiguiente}
+                          className="w-full sm:w-auto bg-accent text-accent-foreground font-black tracking-widest h-12 px-8 uppercase rounded-none"
+                        >
+                          Siguiente <ChevronRight size={18} className="ml-2" />
+                        </Button>
+                      ) : (
+                        <Button
+                          onClick={handleSubmitEval}
+                          disabled={submittingEval || !activeMateriaId}
+                          className="w-full sm:w-auto bg-accent text-accent-foreground font-black tracking-widest h-12 px-8 uppercase rounded-none"
+                        >
+                          <Send size={16} className="mr-2" /> {submittingEval ? 'ENVIANDO...' : 'ENVIAR EVALUACIÓN'}
+                        </Button>
+                      )}
                     </div>
                   </div>
                 )}

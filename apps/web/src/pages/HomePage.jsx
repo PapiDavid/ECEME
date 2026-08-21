@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
-import { Shield, Target, Compass, Phone, Mail, MapPin, ExternalLink } from 'lucide-react';
+import { Shield, Target, Compass, Phone, Mail, MapPin, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react';
 import Header from '@/components/Header.jsx';
 import Footer from '@/components/Footer.jsx';
 // 1. Importamos nuestra nueva configuración de API (Axios)
@@ -32,7 +32,30 @@ const HomePage = () => {
   const notesCiclo1 = publishedNotes.filter(n => n.ciclo === 'PRIMER CICLO');
   const notesCiclo2 = publishedNotes.filter(n => n.ciclo === 'SEGUNDO CICLO');
 
-  const NoteTable = ({ data, title }) => (
+  // El tablero se pagina para que la portada no crezca sin fin: cada ciclo
+  // muestra de a 15 notas y se avanza con Anterior/Siguiente.
+  const NOTAS_POR_PAGINA = 15;
+  const [pageCiclo1, setPageCiclo1] = useState(1);
+  const [pageCiclo2, setPageCiclo2] = useState(1);
+
+  // Acota la página pedida al total real y devuelve solo las filas visibles
+  const paginar = (lista, page) => {
+    const totalPages = Math.max(1, Math.ceil(lista.length / NOTAS_POR_PAGINA));
+    const currentPage = Math.min(page, totalPages);
+    return {
+      totalPages,
+      currentPage,
+      items: lista.slice((currentPage - 1) * NOTAS_POR_PAGINA, currentPage * NOTAS_POR_PAGINA)
+    };
+  };
+
+  // OJO: no es un componente, es una función que devuelve JSX. Si fuera un
+  // componente declarado aquí adentro, React lo volvería a montar en cada
+  // render de la página y se perdería la página elegida. Por eso el estado de
+  // paginación vive arriba y se pasa como parámetro.
+  const renderTablaNotas = ({ data, title, page, setPage }) => {
+    const pag = paginar(data, page);
+    return (
     <div className="mb-12">
       <div className="bg-primary text-primary-foreground py-3 px-6 border-2 border-border border-b-0 inline-block font-extrabold tracking-widest text-xs uppercase">
         {title}
@@ -54,9 +77,9 @@ const HomePage = () => {
               </tr>
             </thead>
             <tbody>
-              {data.map((nota, index) => (
+              {pag.items.map((nota, index) => (
                 <tr key={index}>
-                  <td className="font-bold uppercase text-sm">{nota.nombre_estudiante}</td>
+                  <td className="font-bold uppercase text-sm">{`${nota.grado_estudiante || ''} ${nota.nombre_estudiante}`.trim()}</td>
                   <td className="text-muted-foreground font-bold text-xs uppercase">{nota.nombre_materia}</td>
                   <td className="text-right">
                     <span className={`military-badge ${nota.nota_final >= 51 ? 'border-primary text-primary' : 'border-destructive text-destructive'}`}>
@@ -69,8 +92,37 @@ const HomePage = () => {
           </table>
         )}
       </div>
+
+      {/* Pie de paginación: los botones solo aparecen si hay más de una página */}
+      {data.length > 0 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4 px-1">
+          <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            {data.length} nota(s)
+            {pag.totalPages > 1 && ` · página ${pag.currentPage} de ${pag.totalPages}`}
+          </span>
+          {pag.totalPages > 1 && (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={pag.currentPage <= 1}
+                className="inline-flex items-center gap-1 border-2 border-border bg-card px-4 py-2 font-black text-[10px] uppercase tracking-widest hover:border-primary hover:text-primary transition-colors disabled:opacity-40 disabled:hover:border-border disabled:hover:text-foreground">
+                <ChevronLeft size={14} /> Anterior
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage(p => Math.min(pag.totalPages, p + 1))}
+                disabled={pag.currentPage >= pag.totalPages}
+                className="inline-flex items-center gap-1 border-2 border-border bg-card px-4 py-2 font-black text-[10px] uppercase tracking-widest hover:border-primary hover:text-primary transition-colors disabled:opacity-40 disabled:hover:border-border disabled:hover:text-foreground">
+                Siguiente <ChevronRight size={14} />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
-  );
+    );
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -192,7 +244,7 @@ const HomePage = () => {
               transition={{ duration: 0.6 }}
               className="max-w-5xl mx-auto"
             >
-              {/* Mapa interactivo (Google Maps embebido) con marco militar */}
+              {/* Mapa interactivo (OpenStreetMap embebido) con marco militar */}
               <div className="border-4 border-card shadow-2xl overflow-hidden rounded-sm relative bg-black">
                 {/* Cinta con los colores de la bandera de Bolivia */}
                 <div className="h-1.5 w-full flex">
@@ -208,11 +260,10 @@ const HomePage = () => {
                   </div>
                 </div>
                 <iframe
-                  title="Ubicación de la ECEME en Google Maps"
-                  src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d1871.1368813740125!2d-66.16110335567785!3d-17.39748037323711!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x93e373f38d2a2f7b%3A0xaa0e63b70fa18a4e!2sEscuela%20De%20Comando%20Y%20Estado%20Mayor!5e1!3m2!1ses-419!2sbo!4v1784919606905!5m2!1ses-419!2sbo"
+                  title="Ubicación de la ECEME en OpenStreetMap"
+                  src="https://www.openstreetmap.org/export/embed?bbox=-66.1630153656006%2C-17.39854810459502%2C-66.15853607654573%2C-17.396357166029812&layer=mapnik&marker=-17.397452638593766%2C-66.16077572107315"
                   className="w-full h-[380px] md:h-[460px] block"
                   style={{ border: 0 }}
-                  allowFullScreen
                   loading="lazy"
                   referrerPolicy="strict-origin-when-cross-origin"
                 />
@@ -221,17 +272,30 @@ const HomePage = () => {
               {/* Acciones bajo el mapa */}
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-8">
                 <a
-                  href="https://maps.app.goo.gl/ymYVu2m7FvL6aBtb9"
+                  href="https://www.openstreetmap.org/?mlat=-17.397453&mlon=-66.160776#map=19/-17.397453/-66.160776"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 bg-primary text-primary-foreground font-black px-6 py-3 text-xs uppercase tracking-widest border-2 border-black shadow-xl hover:bg-primary/90 transition-colors"
                 >
-                  <ExternalLink size={16} /> Abrir en Google Maps
+                  <ExternalLink size={16} /> Ver el mapa más grande
                 </a>
                 <span className="inline-flex items-center gap-2 text-[10px] font-bold text-muted-foreground tracking-widest uppercase">
                   <MapPin size={14} className="text-primary" /> Cochabamba · Bolivia
                 </span>
               </div>
+
+              {/* Crédito que exige la licencia de OpenStreetMap (ODbL) */}
+              <p className="text-center text-[9px] font-bold text-muted-foreground tracking-widest uppercase mt-4">
+                Cartografía ©{' '}
+                <a
+                  href="https://www.openstreetmap.org/copyright"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-primary"
+                >
+                  colaboradores de OpenStreetMap
+                </a>
+              </p>
             </motion.div>
           </div>
         </section>
@@ -253,8 +317,8 @@ const HomePage = () => {
               </div>
             ) : (
               <div className="space-y-12">
-                <NoteTable data={notesCiclo1} title="PRIMER CICLO" />
-                <NoteTable data={notesCiclo2} title="SEGUNDO CICLO" />
+                {renderTablaNotas({ data: notesCiclo1, title: 'PRIMER CICLO', page: pageCiclo1, setPage: setPageCiclo1 })}
+                {renderTablaNotas({ data: notesCiclo2, title: 'SEGUNDO CICLO', page: pageCiclo2, setPage: setPageCiclo2 })}
               </div>
             )}
           </div>

@@ -349,7 +349,13 @@ institucional sigue siendo `ECEME2026`.**
 - **Nombre**: solo letras (con tildes y ñ), espacios, apóstrofes, guiones y
   puntos; 3–80 caracteres; mínimo 3 letras reales. Se rechaza si empieza con una
   abreviatura de grado (`CNL.`, `TTE.`…) para que el grado no se escriba dos veces.
-- **Grado**: desplegable con `GRADOS_MILITARES`; dejó de ser texto libre.
+- **Grado**: desplegable con lista cerrada; dejó de ser texto libre. Desde el
+  2026-08-10 hay **un catálogo por rol** (`GRADOS_CURSANTE` = CAPITÁN, MAYOR;
+  `GRADOS_DOCENTE` = TENIENTE CORONEL, CORONEL, los tres generales, MSC., DR.),
+  porque en la ECEME el cursante es un oficial que hace el curso de comando y el
+  docente es jefe, general o civil con posgrado. `GET /api/catalogos` devuelve
+  `grados_cursante` y `grados_docente` por separado; `validarPersona` recibe
+  `{tipo: 'cursante'|'docente'}`.
 - **CI**: 6–9 dígitos, **único** (y se verifica CRUZADO entre cursantes y
   docentes: nadie es las dos cosas). Se rechazan los de relleno (`0000000`).
 - **Materia**: 3–60 caracteres, mínimo 3 letras (adiós «12345»), y no se repite
@@ -378,3 +384,46 @@ edición válidas siguen funcionando con normalización correcta (espacios doble
 acentos, mayúsculas) ✓ · UNIQUE bloquea el INSERT directo en MySQL ✓ · build del
 frontend ✓ · cadena de actas VÁLIDA (3 bloques) y bitácora ÍNTEGRA (58 registros)
 después de la limpieza ✓.
+
+---
+
+# Registro de avances — 2026-08-10 · AJUSTES DE INTERFAZ (docente y cursante)
+
+Tres pedidos de interfaz. La blockchain NO se tocó (cadena verificada válida).
+
+## 1. Botón de la planilla del docente
+`DocentePage.jsx`: el botón decía **«GUARDAR MYSQL»** (jerga técnica a la vista
+del usuario). Ahora dice **«SUBIR NOTAS»** («SUBIENDO...» mientras trabaja) y el
+toast de éxito pasó de «REGISTROS MILITARES ACTUALIZADOS EN MYSQL» a
+**«NOTAS SUBIDAS CORRECTAMENTE»**.
+
+## 2. El «símbolo» antes de cada pregunta (era una `¿` corrompida)
+En el portal del cursante las preguntas se veían como
+`┬┐El docente llega puntual a clases?`.
+- **Causa**: `schema.sql` tiene el texto correcto, pero al importarlo desde la
+  consola de Windows el cliente de MySQL leyó los bytes UTF-8 de `¿` (`C2 BF`)
+  como dos caracteres de la página de códigos del sistema (`┬` `┐`) y los volvió
+  a codificar. NO es un bug del código: la app inserta bien (mysql2 usa utf8mb4).
+- **Arreglo**: `apps/server/reparar-criterios.sql` (idempotente) devuelve la `¿`.
+  **Ya corrido el 2026-08-10** — los 3 criterios quedaron con bytes `C2BF`.
+- **REGLA PARA NO REPETIRLO**: importar SIEMPRE cualquier `.sql` con la
+  codificación explícita:
+  `mysql --default-character-set=utf8mb4 -u root -p eceme_db < archivo.sql`
+  (afectaba también al PDF de desempeño docente, que imprime estos criterios).
+
+## 3. Evaluación docente paginada (`EstudiantePage.jsx`)
+La evaluación pasó de ser una lista larga a un formulario **por páginas**:
+- Constante `PREGUNTAS_POR_PAGINA = 1` (arriba del componente, fácil de subir a
+  5 si algún día hay muchos criterios). Estado `evalPage`.
+- Barra de avance «X DE Y RESPONDIDAS» + «PÁGINA X DE Y» + puntitos indicadores
+  (relleno = página actual, tenue = ya respondida).
+- **Anterior / Siguiente**; el botón «ENVIAR EVALUACIÓN» aparece SOLO en la
+  última página.
+- No se puede avanzar dejando la pregunta en blanco, y al enviar, si falta
+  alguna, el sistema salta a esa página y avisa. Así la evaluación llega
+  siempre completa.
+- Al enviar con éxito vuelve a la página 1.
+
+## Estado: probado (2026-08-10)
+Build del frontend ✓ · criterios servidos por `GET /api/admin/criterios` con la
+`¿` correcta ✓ · cadena de actas VÁLIDA ✓.

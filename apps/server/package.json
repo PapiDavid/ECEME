@@ -1,7 +1,7 @@
 {
   "name": "server",
   "version": "1.0.0",
-  "description": "",
+  "description": "API REST del Sistema de Gestion Academica ECEME",
   "main": "index.js",
   "scripts": {
     "dev": "node --watch index.js",
@@ -9,6 +9,8 @@
     "db:setup": "mysql -u root -p < schema.sql",
     "hash:pwd": "node hashear-passwords.js",
     "sellar:log": "node sellar-auditoria.js",
+    "datos:demo": "node datos-demo.js",
+    "notas:demo": "node notas-demo.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -16,6 +18,10 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "bcryptjs": "^3.0.3"
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "mysql2": "^3.22.3"
   }
 }

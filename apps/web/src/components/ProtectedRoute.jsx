@@ -19,7 +19,7 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   if (allowedRoles && currentUser && !allowedRoles.includes(currentUser.rol)) {
     // If they go to wrong dashboard, send them to their own
     if (currentUser.rol === 'admin') return <Navigate to="/admin" replace />;
-    if (currentUser.rol === 'profesor') return <Navigate to="/docente" replace />;
+    if (currentUser.rol === 'profe') return <Navigate to="/profesor" replace />;
     if (currentUser.rol === 'alumno') return <Navigate to="/estudiante" replace />;
     return <Navigate to="/" replace />;
   }
