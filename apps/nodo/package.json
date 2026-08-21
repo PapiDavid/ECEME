@@ -1,0 +1,17 @@
+{
+  "name": "nodo",
+  "version": "1.0.0",
+  "description": "Nodo auditor de la red privada permisionada de la ECEME",
+  "main": "index.js",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "mysql2": "^3.22.3"
+  }
+}

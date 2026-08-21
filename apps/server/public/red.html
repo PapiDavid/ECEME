@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Red privada permisionada — ECEME</title>
+<style>
+  :root {
+    --verde: #16a34a; --verde-bg: #052e16;
+    --rojo: #dc2626;  --rojo-bg: #450a0a;
+    --ambar: #d97706; --ambar-bg: #451a03;
+    --azul: #2563eb;
+    --panel: #0f172a; --panel2: #1e293b; --borde: #334155;
+    --txt: #e2e8f0; --txt2: #94a3b8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+    background: #020617; color: var(--txt); padding: 24px;
+  }
+  h1 { font-size: 20px; letter-spacing: 1px; margin: 0 0 4px; text-transform: uppercase; }
+  .sub { color: var(--txt2); font-size: 12px; margin-bottom: 20px; }
+  .barra { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
+  button {
+    background: var(--panel2); color: var(--txt); border: 1px solid var(--borde);
+    padding: 9px 16px; border-radius: 8px; font-weight: 700; font-size: 12px;
+    cursor: pointer; text-transform: uppercase; letter-spacing: .5px;
+  }
+  button:hover { border-color: var(--azul); }
+  button.primary { background: var(--azul); border-color: var(--azul); }
+  .auto { color: var(--txt2); font-size: 11px; display: flex; align-items: center; gap: 6px; }
+
+  #banner {
+    padding: 12px 16px; border-radius: 10px; border: 1px solid var(--borde);
+    font-weight: 800; font-size: 13px; margin-bottom: 20px; letter-spacing: .5px;
+  }
+  #banner.ok  { background: var(--verde-bg); border-color: var(--verde); color: #86efac; }
+  #banner.bad { background: var(--rojo-bg);  border-color: var(--rojo);  color: #fca5a5; }
+  #banner.warn{ background: var(--ambar-bg); border-color: var(--ambar); color: #fcd34d; }
+  #banner.neutral { background: var(--panel); color: var(--txt2); }
+
+  /* ---- Panel de nodos ---- */
+  .nodos { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-bottom: 26px; }
+  .nodo {
+    background: var(--panel); border: 2px solid var(--borde);
+    border-radius: 14px; padding: 16px;
+  }
+  .nodo.vivo   { border-color: var(--verde); }
+  .nodo.caido  { border-color: var(--rojo); opacity: .75; }
+  .nodo h3 { margin: 0; font-size: 14px; letter-spacing: .5px; display: flex; align-items: center; gap: 8px; }
+  .semaforo { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex: none; }
+  .semaforo.on  { background: var(--verde); box-shadow: 0 0 10px var(--verde); }
+  .semaforo.off { background: var(--rojo); }
+  .rol { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--txt2); margin: 6px 0 12px; }
+  .dato { display: flex; justify-content: space-between; font-size: 12px; padding: 4px 0; border-top: 1px solid var(--borde); }
+  .dato b { font-variant-numeric: tabular-nums; }
+  .mono { font-family: Consolas, monospace; font-size: 11px; color: var(--txt2); }
+
+  /* ---- Bloques ---- */
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: var(--txt2); margin: 26px 0 12px; }
+  .bloque {
+    background: var(--panel); border: 2px solid var(--borde);
+    border-radius: 14px; padding: 14px 16px; margin-bottom: 10px;
+  }
+  .bloque.bad { border-color: var(--rojo); }
+  .cab { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .idx { font-weight: 900; font-size: 15px; }
+  .badge { font-size: 10px; font-weight: 800; padding: 3px 9px; border-radius: 999px; text-transform: uppercase; letter-spacing: .5px; }
+  .badge.ok      { background: var(--verde); color: #022c16; }
+  .badge.bad     { background: var(--rojo); color: #fff; }
+  .badge.heredado{ background: #7c3aed; color: #fff; }
+  .badge.firma   { background: var(--panel2); color: var(--txt); border: 1px solid var(--verde); }
+  .titulo { color: var(--txt2); font-size: 12px; }
+  .firmas { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .firmas .etq { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--txt2); margin-right: 4px; }
+  .hash { font-family: Consolas, monospace; font-size: 11px; color: var(--txt2); margin-top: 6px; }
+  .nota { color: var(--txt2); font-size: 11px; margin-top: 18px; line-height: 1.6; border-top: 1px solid var(--borde); padding-top: 12px; }
+</style>
+</head>
+<body>
+
+<h1>Red privada permisionada — cadena de actas</h1>
+<div class="sub" id="subtitulo">Cargando…</div>
+
+<div class="barra">
+  <button class="primary" onclick="refrescar()">Actualizar estado</button>
+  <button onclick="verificacionCruzada()">Verificación cruzada</button>
+  <a href="/blockchain.html"><button>Ver la cadena</button></a>
+  <label class="auto"><input type="checkbox" id="autoref" checked> Autorefresco cada 3 s</label>
+</div>
+
+<div id="banner" class="neutral">Consultando el estado de la red…</div>
+
+<div class="nodos" id="nodos"></div>
+
+<h2>Bloques y sus firmas</h2>
+<div id="bloques"></div>
+
+<div class="nota">
+  <b>Cómo leer esta página.</b>
+  Cada nodo guarda su <b>propia copia</b> de la cadena en su propia base de datos.
+  Un bloque solo se confirma si reúne el <b>quórum</b> de firmas Ed25519 de nodos
+  autorizados en <code>red-permisionada.json</code>. Las firmas se calculan sobre el
+  hash del bloque y se guardan aparte: <b>no entran en el hash</b>, por eso la cadena
+  anterior a la red sigue verificando igual.<br>
+  Los bloques marcados <span class="badge heredado">heredado</span> se sellaron antes
+  de que existiera la red, así que no tienen firmas; se validan por hash y encadenado.<br>
+  La <b>verificación cruzada</b> compara el hash <i>recalculado desde el contenido</i> de
+  cada copia. Así detecta una alteración hecha con un UPDATE directo en MySQL aunque el
+  atacante no toque la columna <code>hash</code>.
+</div>
+
+<script>
+const API = '';   // misma máquina que sirve esta página (nodo 1)
+
+const corto = (h, n = 16) => (h ? String(h).slice(0, n) + '…' : '—');
+
+async function pedir(ruta) {
+  const r = await fetch(API + ruta);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+function pintarBanner(clase, texto) {
+  const b = document.getElementById('banner');
+  b.className = clase;
+  b.textContent = texto;
+}
+
+function pintarNodos(estado) {
+  document.getElementById('subtitulo').textContent =
+    estado.red + ' · firma ' + estado.algoritmo_firma + ' · hash ' + estado.algoritmo_hash +
+    ' · quórum ' + estado.quorum + ' de ' + estado.total_nodos;
+
+  document.getElementById('nodos').innerHTML = estado.nodos.map(n => `
+    <div class="nodo ${n.vivo ? 'vivo' : 'caido'}">
+      <h3><span class="semaforo ${n.vivo ? 'on' : 'off'}"></span> ${n.nombre}</h3>
+      <div class="rol">${n.nodeId} · ${n.rol}</div>
+      <div class="dato"><span>Estado</span><b>${n.vivo ? 'EN LÍNEA' : 'CAÍDO'}</b></div>
+      <div class="dato"><span>Altura de su copia</span><b>${n.vivo ? n.altura : '—'}</b></div>
+      <div class="dato"><span>Base de datos</span><b class="mono">${n.base_datos || '—'}</b></div>
+      <div class="dato"><span>Último hash</span><b class="mono">${corto(n.ultimo_hash, 12)}</b></div>
+    </div>`).join('');
+
+  if (!estado.puede_sellar) {
+    pintarBanner('bad',
+      'SIN QUÓRUM: solo ' + estado.nodos_vivos + ' nodo(s) en línea de los ' + estado.quorum +
+      ' necesarios. La red NO puede sellar actas nuevas.');
+  } else if (!estado.copias_coinciden) {
+    pintarBanner('warn',
+      'RED OPERATIVA, pero las copias están a distinta altura. Puede haber un nodo ' +
+      'reincorporándose: use «Verificación cruzada» para distinguir atraso de alteración.');
+  } else {
+    pintarBanner('ok',
+      'RED OPERATIVA · ' + estado.nodos_vivos + ' de ' + estado.total_nodos +
+      ' nodos en línea · las ' + estado.nodos_vivos + ' copias coinciden.');
+  }
+}
+
+function pintarBloques(cadena) {
+  document.getElementById('bloques').innerHTML = cadena.map(b => {
+    const firmas = b.firmas || [];
+    const heredado = firmas.length === 0;
+    const mal = !b.valido;
+    return `
+    <div class="bloque ${mal ? 'bad' : ''}">
+      <div class="cab">
+        <span class="idx">Bloque #${b.indice}</span>
+        <span class="titulo">${(b.acta && b.acta.materia) || ''} ${b.ciclo ? '· ' + b.ciclo : ''}</span>
+        ${mal ? '<span class="badge bad">Alterado</span>' : '<span class="badge ok">Íntegro</span>'}
+        ${heredado ? '<span class="badge heredado">Heredado · sin firmas</span>' : ''}
+      </div>
+      ${firmas.length ? `<div class="firmas"><span class="etq">Firmas (${firmas.length}):</span>` +
+        firmas.map(f => `<span class="badge firma">✔ ${f.nodeId} · ${f.nombre || ''}</span>`).join('') +
+        '</div>' : ''}
+      <div class="hash">hash ${corto(b.hash, 24)} · previo ${corto(b.hash_previo, 24)}</div>
+    </div>`;
+  }).join('');
+}
+
+async function refrescar() {
+  try {
+    const [estado, verif] = await Promise.all([
+      pedir('/api/red/estado'),
+      pedir('/api/blockchain/verificar')
+    ]);
+    pintarNodos(estado);
+    pintarBloques(verif.bloques);
+    if (!verif.valida) {
+      pintarBanner('bad',
+        'CADENA ALTERADA en la copia del nodo 1: bloque #' + verif.primer_error.indice +
+        ' (' + verif.primer_error.motivo + '). Compare con los auditores usando «Verificación cruzada».');
+    }
+  } catch (e) {
+    pintarBanner('bad', 'No se pudo consultar la red: ' + e.message);
+  }
+}
+
+async function verificacionCruzada() {
+  try {
+    const v = await pedir('/api/red/verificacion-cruzada');
+    if (v.todas_coinciden) {
+      pintarBanner('ok',
+        'VERIFICACIÓN CRUZADA CONFORME: las copias vivas son idénticas (altura ' +
+        v.altura_referencia + ').');
+      return;
+    }
+    const partes = [];
+    if (v.alterados_en_referencia.length) {
+      partes.push('la copia del nodo 1 tiene alterado(s) el/los bloque(s) ' + v.alterados_en_referencia.join(', '));
+    }
+    v.comparaciones.filter(c => c.vivo && c.diverge_en !== null && c.diverge_en !== undefined)
+      .forEach(c => partes.push(c.nodeId + ' diverge en el bloque ' + c.diverge_en));
+    v.comparaciones.filter(c => c.vivo && c.atrasado)
+      .forEach(c => partes.push(c.nodeId + ' está atrasado (altura ' + c.altura + ')'));
+    v.comparaciones.filter(c => !c.vivo)
+      .forEach(c => partes.push(c.nodeId + ' está caído'));
+    pintarBanner('bad', 'DIVERGENCIA DETECTADA: ' + partes.join(' · '));
+  } catch (e) {
+    pintarBanner('bad', 'No se pudo verificar: ' + e.message);
+  }
+}
+
+refrescar();
+setInterval(() => { if (document.getElementById('autoref').checked) refrescar(); }, 3000);
+</script>
+</body>
+</html>

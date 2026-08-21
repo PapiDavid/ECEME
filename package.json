@@ -6,7 +6,13 @@
     "dev": "concurrently --kill-others --raw \"npm run dev --prefix apps/server\" \"npm run dev --prefix apps/web\"",
     "build": "concurrently --raw \"npm run build --prefix apps/web\"",
     "start": "concurrently --kill-others --raw \"npm run start --prefix apps/server\" \"npm run start --prefix apps/web\"",
-    "lint": "concurrently --raw \"npm run lint --prefix apps/web\""
+    "lint": "concurrently --raw \"npm run lint --prefix apps/web\"",
+    "red": "concurrently --kill-others --raw --names \"NODO-1,NODO-2,NODO-3\" \"npm run dev --prefix apps/server\" \"npm run nodo:2\" \"npm run nodo:3\"",
+    "red:completa": "concurrently --kill-others --raw --names \"NODO-1,NODO-2,NODO-3,WEB\" \"npm run dev --prefix apps/server\" \"npm run nodo:2\" \"npm run nodo:3\" \"npm run dev --prefix apps/web\"",
+    "nodo:2": "node apps/nodo/index.js nodo-2",
+    "nodo:3": "node apps/nodo/index.js nodo-3",
+    "red:claves": "node scripts/generar-claves.js",
+    "red:bd": "node scripts/crear-bd-nodos.js"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

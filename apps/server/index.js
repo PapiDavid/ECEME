@@ -5,6 +5,10 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const { GENESIS_PREV, calcularHash } = require('./blockchain');
 const { GENESIS_AUDITORIA, calcularHashAuditoria } = require('./auditoria-hash');
+// Red privada permisionada: consenso por quórum de firmas (ver red/proponente.js)
+const consensoRed = require('../../red/proponente');
+const { firmasValidas } = require('../../red/identidad');
+const cadenaLocal = require('../../red/cadena-local');
 const {
   GRADOS_CURSANTE, GRADOS_DOCENTE, CICLOS, limpiar,
   validarPersona, validarNombreMateria, validarCiclo
@@ -604,11 +608,51 @@ app.post('/api/notas', requiereRol('admin', 'profe'), (req, res) => {
   });
 });
 
+// Publica TODAS las notas en un acta general. Antes marcaba las notas como
+// publicadas sin sellar ningún bloque; ahora pasa por el mismo consenso que
+// el resto: sin quórum no se publica nada.
 app.post('/api/notas/publicar-lote', requiereRol('admin'), (req, res) => {
-  db.query("UPDATE notas SET publicado = 1", (err) => {
-    if (err) return res.status(500).json(err);
-    registrarAuditoria(req, 'PUBLICAR_NOTAS', 'Publicó el tablero de notas (lote completo)');
-    res.json({ message: "Tablero publicado" });
+  (async () => {
+    const notas = await promesaDb(`
+      SELECT e.codigo, e.nombre AS estudiante, e.ciclo,
+             n.materia_id, m.nombre AS materia,
+             n.parcial_1, n.parcial_final, n.trabajos, n.nota_final
+      FROM notas n
+      JOIN estudiantes e ON n.estudiante_id = e.id
+      JOIN materias m ON n.materia_id = m.id
+      ORDER BY e.nombre`);
+    if (notas.length === 0) return res.status(400).json({ message: "No hay notas para publicar" });
+
+    const cfgRows = await promesaDb("SELECT comandante_nombre, gestion FROM configuracion LIMIT 1");
+    const cfg = cfgRows[0] || { comandante_nombre: 'POR ASIGNAR', gestion: '2026' };
+    const acta = {
+      materia: 'ACTA GENERAL',
+      ciclo: null,
+      gestion: cfg.gestion || '2026',
+      comandante: cfg.comandante_nombre || 'POR ASIGNAR',
+      sello_tiempo: new Date().toISOString(),
+      registros: notas.map(registroDeNota)
+    };
+
+    const { bloque, replicacion } = await sellarConConsenso({ materia_id: null, ciclo: null, acta });
+    await promesaDb("UPDATE notas SET publicado = 1");
+
+    const firmantes = bloque.firmas.map(f => f.nodeId);
+    registrarAuditoria(req, 'PUBLICAR_NOTAS',
+      `Publicó el tablero completo y lo selló como bloque #${bloque.indice} ` +
+      `con ${firmantes.length} firma(s) (${firmantes.join(', ')})`);
+    res.json({
+      message: "Tablero publicado y sellado en la cadena",
+      indice: bloque.indice, hash: bloque.hash,
+      firmas: bloque.firmas.map(f => ({ nodeId: f.nodeId, nombre: f.nombre })),
+      replicacion
+    });
+  })().catch(err => {
+    if (err.codigo === 'SIN_QUORUM') {
+      registrarAuditoria(req, 'ACTA_RECHAZADA', 'La red rechazó el tablero completo por falta de quórum');
+      return responderSinQuorum(res, err);
+    }
+    res.status(500).json({ message: err.message });
   });
 });
 
@@ -640,26 +684,69 @@ function registroDeNota(n) {
   };
 }
 
-// Inserta secuencialmente una lista de actas, encadenando cada bloque al anterior.
+// ------------------------------------------------------------
+//  SELLADO CON CONSENSO — punto único por donde pasan TODAS las rutas
+//  que crean bloques. Propone el bloque a la red y solo lo guarda si
+//  alcanza el quórum de firmas. Si no lo alcanza, no escribe NADA:
+//  ni el bloque ni la marca de publicado en las notas.
+// ------------------------------------------------------------
+const promesaDb = (sql, params = []) =>
+  new Promise((ok, mal) => db.query(sql, params, (e, r) => (e ? mal(e) : ok(r))));
+
+const ultimoBloquePromesa = () =>
+  promesaDb("SELECT * FROM bloques ORDER BY indice DESC LIMIT 1").then(r => r[0] || null);
+
+// Propone UN acta a la red y, si hay quórum, la guarda y la replica.
+// Devuelve el bloque confirmado. Lanza un error con codigo 'SIN_QUORUM'
+// (y el detalle en err.datos) cuando la red no lo aprueba.
+async function sellarConConsenso({ materia_id, ciclo, acta }) {
+  const prev = await ultimoBloquePromesa();
+  const r = await consensoRed.proponerBloque({ ultimo: prev, materia_id, ciclo, acta });
+  if (!r.ok) {
+    const err = new Error('La red no alcanzó el quórum para sellar el acta');
+    err.codigo = 'SIN_QUORUM';
+    err.datos = r;
+    throw err;
+  }
+  const b = r.bloque;
+  await promesaDb(
+    "INSERT INTO bloques (indice, materia_id, ciclo, acta_json, hash_previo, hash, firmas) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [b.indice, b.materia_id, b.ciclo, JSON.stringify(b.acta), b.hash_previo, b.hash, JSON.stringify(b.firmas)]
+  );
+  // La replicación no condiciona la confirmación: un auditor que no responda
+  // se pondrá al día solo la próxima vez que sincronice.
+  const replicacion = await consensoRed.replicar(b);
+  return { bloque: b, replicacion };
+}
+
+// Respuesta uniforme cuando la red rechaza el sellado por falta de quórum.
+function responderSinQuorum(res, err) {
+  const d = err.datos || {};
+  return res.status(409).json({
+    message: `No se pudo publicar: la red permisionada no alcanzó el quórum ` +
+             `(${d.firmas_validas || 0} de ${d.quorum || '?'} firmas necesarias). ` +
+             `Las notas NO fueron publicadas.`,
+    motivo: 'SIN_QUORUM',
+    firmas_validas: d.firmas_validas || 0,
+    quorum: d.quorum,
+    total_nodos: d.total_nodos,
+    firmantes: d.firmantes || []
+  });
+}
+
+// Sella secuencialmente una lista de actas. Cada bloque pasa por consenso y
+// se encadena al anterior. Si una no alcanza quórum, se detiene ahí.
 function sellarActasSecuencial(actas, res) {
-  ultimoBloque((err, prevInicial) => {
-    if (err) return res.status(500).json(err);
-    let prev = prevInicial;
-    let i = 0;
-    (function siguiente() {
-      if (i >= actas.length) return res.json({ message: "Cadena generada", bloques_creados: actas.length });
-      const { materia_id, ciclo, acta } = actas[i];
-      const indice = prev ? prev.indice + 1 : 0;
-      const hashPrevio = prev ? prev.hash : GENESIS_PREV;
-      const hash = calcularHash(indice, materia_id, ciclo, acta, hashPrevio);
-      db.query("INSERT INTO bloques (indice, materia_id, ciclo, acta_json, hash_previo, hash) VALUES (?, ?, ?, ?, ?, ?)",
-        [indice, materia_id, ciclo, JSON.stringify(acta), hashPrevio, hash], (errI) => {
-          if (errI) return res.status(500).json(errI);
-          prev = { indice, hash };
-          i++;
-          siguiente();
-        });
-    })();
+  (async () => {
+    const creados = [];
+    for (const { materia_id, ciclo, acta } of actas) {
+      const { bloque } = await sellarConConsenso({ materia_id, ciclo, acta });
+      creados.push({ indice: bloque.indice, firmas: bloque.firmas.map(f => f.nodeId) });
+    }
+    res.json({ message: "Cadena generada", bloques_creados: creados.length, bloques: creados });
+  })().catch(err => {
+    if (err.codigo === 'SIN_QUORUM') return responderSinQuorum(res, err);
+    res.status(500).json({ message: err.message });
   });
 }
 
@@ -700,24 +787,37 @@ app.post('/api/actas/publicar', requiereRol('admin'), (req, res) => {
         registros: notas.map(registroDeNota)
       };
 
-      ultimoBloque((errU, prev) => {
-        if (errU) return res.status(500).json(errU);
-        const indice = prev ? prev.indice + 1 : 0;
-        const hashPrevio = prev ? prev.hash : GENESIS_PREV;
-        const hash = calcularHash(indice, materiaId, ciclo, acta, hashPrevio);
-        db.query("INSERT INTO bloques (indice, materia_id, ciclo, acta_json, hash_previo, hash) VALUES (?, ?, ?, ?, ?, ?)",
-          [indice, materiaId, ciclo, JSON.stringify(acta), hashPrevio, hash], (errI) => {
-            if (errI) return res.status(500).json(errI);
-            let upd = "UPDATE notas SET publicado = 1";
-            const uParams = [];
-            if (materiaId) { upd += " WHERE materia_id = ?"; uParams.push(materiaId); }
-            else if (cicloFiltro) { upd += " WHERE estudiante_id IN (SELECT id FROM estudiantes WHERE ciclo = ?)"; uParams.push(cicloFiltro); }
-            db.query(upd, uParams, (errUp) => {
-              if (errUp) return res.status(500).json(errUp);
-              registrarAuditoria(req, 'PUBLICAR_ACTA', `Publicó el acta "${acta.materia}" y la selló como bloque #${indice} de la cadena`);
-              res.json({ message: "Acta publicada y sellada en la cadena", indice, hash });
-            });
-          });
+      // CONSENSO DE LA RED: el bloque se propone a los auditores y solo se
+      // guarda si reúne el quórum de firmas. Si no lo reúne, se aborta la
+      // publicación entera: las notas NO quedan marcadas como publicadas.
+      (async () => {
+        const { bloque, replicacion } = await sellarConConsenso({ materia_id: materiaId, ciclo, acta });
+
+        let upd = "UPDATE notas SET publicado = 1";
+        const uParams = [];
+        if (materiaId) { upd += " WHERE materia_id = ?"; uParams.push(materiaId); }
+        else if (cicloFiltro) { upd += " WHERE estudiante_id IN (SELECT id FROM estudiantes WHERE ciclo = ?)"; uParams.push(cicloFiltro); }
+        await promesaDb(upd, uParams);
+
+        const firmantes = bloque.firmas.map(f => f.nodeId);
+        registrarAuditoria(req, 'PUBLICAR_ACTA',
+          `Publicó el acta "${acta.materia}" y la selló como bloque #${bloque.indice} ` +
+          `con ${firmantes.length} firma(s) de la red (${firmantes.join(', ')})`);
+        res.json({
+          message: "Acta publicada y sellada en la cadena",
+          indice: bloque.indice, hash: bloque.hash,
+          firmas: bloque.firmas.map(f => ({ nodeId: f.nodeId, nombre: f.nombre })),
+          quorum: consensoRed.red.quorum,
+          replicacion
+        });
+      })().catch(err => {
+        if (err.codigo === 'SIN_QUORUM') {
+          registrarAuditoria(req, 'ACTA_RECHAZADA',
+            `La red rechazó el acta "${acta.materia}" por falta de quórum ` +
+            `(${(err.datos || {}).firmas_validas || 0} de ${(err.datos || {}).quorum} firmas)`);
+          return responderSinQuorum(res, err);
+        }
+        res.status(500).json({ message: err.message });
       });
     });
   });
@@ -754,16 +854,162 @@ app.get('/api/blockchain/verificar', (req, res) => {
         };
       }
       hashPrevioEsperado = b.hash; // el siguiente bloque debe apuntar a ESTE hash
+      // Firmas de consenso: quiénes aprobaron este bloque. Los bloques
+      // anteriores a la red no tienen (son "heredados").
+      const firmas = b.firmas
+        ? (typeof b.firmas === 'string' ? JSON.parse(b.firmas) : b.firmas)
+        : [];
       return {
         id: b.id, indice: b.indice, materia_id: b.materia_id, ciclo: b.ciclo,
         acta, hash_previo: b.hash_previo, hash: b.hash,
         hash_recalculado: hashRecalculado,
         hash_intacto: hashIntacto, enlace_intacto: enlaceIntacto, valido,
+        firmas,
+        // Se revalidan criptográficamente: una firma copiada de otro bloque no pasa
+        firmas_validas: firmasValidas(b.hash, firmas, consensoRed.red).map(f => f.nodeId),
         creado_en: b.creado_en
       };
     });
     res.json({ valida: cadenaValida, longitud: bloques.length, primer_error: primerError, bloques });
   });
+});
+
+// ============================================================
+//  RED PERMISIONADA — observabilidad para demostrarla en vivo
+// ============================================================
+
+// Pregunta a un nodo su estado. Nunca lanza: un nodo caído devuelve vivo:false.
+async function estadoDeNodo(nodo) {
+  if (nodo.rol === 'proponente') {
+    // El proponente se consulta a sí mismo, directo contra su propia copia.
+    const filas = await promesaDb("SELECT COUNT(*) AS n, MAX(indice) AS ultimo FROM bloques");
+    const ult = await promesaDb("SELECT hash FROM bloques ORDER BY indice DESC LIMIT 1");
+    return {
+      nodeId: nodo.nodeId, nombre: nodo.nombre, rol: nodo.rol, url: nodo.url,
+      vivo: true, altura: filas[0].n, ultimo_indice: filas[0].ultimo,
+      ultimo_hash: ult[0] ? ult[0].hash : null, base_datos: process.env.DB_NAME || 'eceme_db'
+    };
+  }
+  try {
+    const r = await fetch(nodo.url + '/nodo/info', { signal: AbortSignal.timeout(consensoRed.TIMEOUT_MS) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const info = await r.json();
+    return { nodeId: nodo.nodeId, nombre: nodo.nombre, rol: nodo.rol, url: nodo.url, vivo: true, ...info };
+  } catch (e) {
+    return { nodeId: nodo.nodeId, nombre: nodo.nombre, rol: nodo.rol, url: nodo.url,
+             vivo: false, motivo: e.message, altura: null, ultimo_hash: null };
+  }
+}
+
+// --- Estado de la red: quién está vivo, a qué altura y con qué quórum ---
+app.get('/api/red/estado', (req, res) => {
+  (async () => {
+    const nodos = await Promise.all(consensoRed.red.nodos.map(estadoDeNodo));
+    const vivos = nodos.filter(n => n.vivo).length;
+    const alturas = nodos.filter(n => n.vivo).map(n => n.altura);
+    res.json({
+      red: consensoRed.red.red,
+      algoritmo_firma: consensoRed.red.algoritmo_firma,
+      algoritmo_hash: consensoRed.red.algoritmo_hash,
+      quorum: consensoRed.red.quorum,
+      total_nodos: consensoRed.red.nodos.length,
+      nodos_vivos: vivos,
+      // Con menos nodos vivos que el quórum, la red no puede sellar nada
+      puede_sellar: vivos >= consensoRed.red.quorum,
+      copias_coinciden: alturas.length > 0 && alturas.every(a => a === alturas[0]),
+      nodos
+    });
+  })().catch(e => res.status(500).json({ message: e.message }));
+});
+
+// --- Verificación cruzada: compara las tres copias entre sí ---
+// Detecta si alguna divergió y en qué índice. Es la prueba de que alterar
+// la copia de un nodo no pasa desapercibido.
+app.get('/api/red/verificacion-cruzada', (req, res) => {
+  (async () => {
+    const referencia = consensoRed.red.nodos.find(n => n.rol === 'proponente');
+
+    // Huellas (índice + hash) de cada copia
+    const copias = await Promise.all(consensoRed.red.nodos.map(async (nodo) => {
+      if (nodo.rol === 'proponente') {
+        // Mismo cálculo que hacen los auditores, para comparar peras con peras
+        return { nodeId: nodo.nodeId, nombre: nodo.nombre, vivo: true, huellas: await cadenaLocal.huellas(db) };
+      }
+      try {
+        const r = await fetch(nodo.url + '/nodo/huellas', { signal: AbortSignal.timeout(consensoRed.TIMEOUT_MS) });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return { nodeId: nodo.nodeId, nombre: nodo.nombre, vivo: true, huellas: await r.json() };
+      } catch (e) {
+        return { nodeId: nodo.nodeId, nombre: nodo.nombre, vivo: false, motivo: e.message, huellas: null };
+      }
+    }));
+
+    const base = copias.find(c => c.nodeId === referencia.nodeId);
+    const comparaciones = copias.filter(c => c.nodeId !== referencia.nodeId).map(c => {
+      if (!c.vivo) return { nodeId: c.nodeId, nombre: c.nombre, vivo: false, coincide: null };
+      const comunes = Math.min(base.huellas.length, c.huellas.length);
+      let divergeEn = null;
+      for (let i = 0; i < comunes; i++) {
+        // Se compara el hash RECALCULADO desde el contenido de cada copia:
+        // así se detecta una alteración aunque el atacante no toque la
+        // columna hash (que es el caso más común de manipulación directa).
+        if (base.huellas[i].hash_recalculado !== c.huellas[i].hash_recalculado) {
+          divergeEn = base.huellas[i].indice;
+          break;
+        }
+      }
+      return {
+        nodeId: c.nodeId, nombre: c.nombre, vivo: true,
+        altura: c.huellas.length,
+        coincide: divergeEn === null && base.huellas.length === c.huellas.length,
+        diverge_en: divergeEn,
+        // Diferencia de altura: un nodo atrasado no es lo mismo que uno alterado
+        atrasado: divergeEn === null && c.huellas.length < base.huellas.length
+      };
+    });
+
+    const vivas = comparaciones.filter(c => c.vivo);
+    // Bloques de la copia de referencia cuyo contenido no coincide con su
+    // propio hash guardado: alteración local, aunque las otras copias estén sanas.
+    const alteradosEnReferencia = base.huellas
+      .filter(h => h.hash !== h.hash_recalculado)
+      .map(h => h.indice);
+    res.json({
+      referencia: referencia.nodeId,
+      altura_referencia: base.huellas.length,
+      alterados_en_referencia: alteradosEnReferencia,
+      // Solo se declara conforme si TODAS las copias vivas coinciden
+      todas_coinciden: vivas.length > 0 && vivas.every(c => c.coincide) && alteradosEnReferencia.length === 0,
+      divergencias: vivas.filter(c => c.diverge_en !== null && c.diverge_en !== undefined)
+                         .map(c => ({ nodeId: c.nodeId, indice: c.diverge_en })),
+      comparaciones
+    });
+  })().catch(e => res.status(500).json({ message: e.message }));
+});
+
+// --- Registro de permisos de la red (claves públicas y roles) ---
+app.get('/api/red/config', (req, res) => {
+  res.json({
+    ...consensoRed.red,
+    nodos: consensoRed.red.nodos.map(n => ({ ...n, clave_publica: n.clave_publica.trim() }))
+  });
+});
+
+// --- Pedir a los auditores que se sincronicen ahora ---
+app.post('/api/red/sincronizar', requiereRol('admin'), (req, res) => {
+  (async () => {
+    const resultados = await Promise.all(consensoRed.auditores().map(async (nodo) => {
+      try {
+        const r = await fetch(nodo.url + '/nodo/sincronizar', {
+          method: 'POST', signal: AbortSignal.timeout(10000)
+        });
+        return { nodeId: nodo.nodeId, ...(await r.json()) };
+      } catch (e) {
+        return { nodeId: nodo.nodeId, error: e.message };
+      }
+    }));
+    res.json({ resultados });
+  })().catch(e => res.status(500).json({ message: e.message }));
 });
 
 // ============================================================

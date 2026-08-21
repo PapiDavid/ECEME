@@ -1,3 +1,6 @@
 node_modules
 .env
 apps/server/.env
+
+# Claves privadas de los nodos de la red permisionada (NUNCA se versionan)
+claves/

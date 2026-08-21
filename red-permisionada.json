@@ -1,0 +1,34 @@
+{
+  "red": "ECEME — cadena privada permisionada",
+  "descripcion": "Registro de permisos: solo los nodos listados aquí pueden firmar bloques. Las claves privadas viven en claves/ y nunca se versionan.",
+  "algoritmo_firma": "Ed25519",
+  "algoritmo_hash": "SHA-256",
+  "quorum": 2,
+  "total_nodos": 3,
+  "nodos": [
+    {
+      "nodeId": "nodo-1",
+      "nombre": "VALIDADOR-PRINCIPAL",
+      "url": "http://localhost:3001",
+      "rol": "proponente",
+      "descripcion": "Servidor académico de la ECEME. Propone los bloques y expone la API.",
+      "clave_publica": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAtIzd/NB05HJUsIlF0apqsJ+TPd/WegQ1b2nCQqlrWxo=\n-----END PUBLIC KEY-----\n"
+    },
+    {
+      "nodeId": "nodo-2",
+      "nombre": "AUDITOR-A",
+      "url": "http://localhost:3002",
+      "rol": "auditor",
+      "descripcion": "Nodo auditor independiente. Valida y firma; guarda su propia copia.",
+      "clave_publica": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAmkaavt5Di4Dh/DndWcMHkuwVUT02DCaXnDDVSCATYFg=\n-----END PUBLIC KEY-----\n"
+    },
+    {
+      "nodeId": "nodo-3",
+      "nombre": "AUDITOR-B",
+      "url": "http://localhost:3003",
+      "rol": "auditor",
+      "descripcion": "Nodo auditor independiente. Valida y firma; guarda su propia copia.",
+      "clave_publica": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA87CqTToiLDSSebdxKHH8/1SiFIUwPiPpPvg8ZtflMfA=\n-----END PUBLIC KEY-----\n"
+    }
+  ]
+}
