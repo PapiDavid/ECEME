@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 const HomePage = () => {
   const [publishedNotes, setPublishedNotes] = useState([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
+  const blockchainUrl = `http://${window.location.hostname}:3001/red.html`;
 
   useEffect(() => {
     const fetchPublishedNotes = async () => {
@@ -161,6 +162,12 @@ const HomePage = () => {
               <p className="text-sm md:text-base text-background/70 max-w-3xl mx-auto font-bold tracking-[0.2em] leading-relaxed uppercase">
                 Formación estratégica para la seguridad y defensa del territorio nacional.
               </p>
+              <a
+                href={blockchainUrl}
+                className="mt-8 inline-flex items-center gap-2 border-2 border-secondary bg-foreground/70 px-6 py-3 text-[11px] font-black tracking-[0.18em] text-secondary uppercase transition-colors hover:bg-secondary hover:text-foreground"
+              >
+                <Shield size={16} /> Ver centro de integridad blockchain
+              </a>
             </motion.div>
           </div>
         </section>

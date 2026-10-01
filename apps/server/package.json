@@ -11,6 +11,7 @@
     "sellar:log": "node sellar-auditoria.js",
     "datos:demo": "node datos-demo.js",
     "notas:demo": "node notas-demo.js",
+    "monitor:red": "node monitor-red.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

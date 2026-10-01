@@ -14,6 +14,9 @@ const Header = () => {
   // en la página principal. En cualquier otra página no harían nada, así que se
   // ocultan y solo se muestran cuando estás en el inicio ("/").
   const isHome = location.pathname === '/';
+  // La red se sirve desde Express para que muestre su estado real, por eso
+  // conservamos el host actual y solo cambiamos al puerto del servidor.
+  const blockchainUrl = `http://${window.location.hostname}:3001/red.html`;
 
   const getDashboardLink = () => {
     if (!currentUser) return '/';
@@ -87,6 +90,13 @@ const Header = () => {
           )}
 
           <div className="hidden md:flex items-center space-x-4">
+            <a
+              href={blockchainUrl}
+              className="text-[10px] font-black tracking-widest text-secondary hover:text-background transition-colors"
+              title="Ver el centro de integridad de la red blockchain"
+            >
+              ⛓ BLOCKCHAIN
+            </a>
             {isAuthenticated ? (
               <div className="flex items-center space-x-4">
                 <Link to={getDashboardLink()} className="flex items-center space-x-2 text-accent hover:text-secondary transition-colors">
@@ -136,6 +146,13 @@ const Header = () => {
                 </button>
               ))}
               {isHome && <div className="h-px bg-background/10 w-full my-2"></div>}
+              <a
+                href={blockchainUrl}
+                className="text-xs font-black tracking-widest text-secondary hover:text-background"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                ⛓ CENTRO BLOCKCHAIN
+              </a>
               {isAuthenticated ? (
                 <>
                   <p className="text-xs text-muted-foreground font-bold tracking-widest">SESIÓN INICIADA COMO {currentUser.rol}</p>

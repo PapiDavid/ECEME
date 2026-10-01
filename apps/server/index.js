@@ -14,6 +14,7 @@ const {
   validarPersona, validarNombreMateria, validarCiclo
 } = require('./validaciones');
 require('dotenv').config();
+const { iniciarMonitor } = require('./monitor-red');
 
 const app = express();
 app.use(cors());
@@ -1384,4 +1385,8 @@ app.get('/api/notas/estudiante/:id', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🚀 Servidor ECEME activo e integrado en puerto ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor ECEME activo e integrado en puerto ${PORT}`);
+  // El monitor vive junto al nodo principal: no requiere una quinta terminal.
+  iniciarMonitor();
+});
